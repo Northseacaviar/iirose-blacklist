@@ -145,11 +145,14 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 
 ## 手机（触屏）怎么用
 
-1. **注入**：手机浏览器里用站点终端（`js`）粘地址，或把下面这段存成书签、进站后点一下（书签在触屏上没有右键，长按书签→编辑可以改地址）：
+**注入方式和电脑完全一样**：站点终端（`js`）粘贴地址就行，存在同一个 `extJs` 里，手机浏览器刷新即生效 —— 不需要书签、不需要别的手段。
+
+1. **注入**：粘这一行（推荐 loader，手机与电脑同一行）：
 
    ```
-   javascript:(function(){var f=document.getElementById('mainFrame'),d=f&&f.contentDocument;if(!d){alert('没找到 #mainFrame');return}var s=d.createElement('script');s.src='https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js';d.body.appendChild(s)})()
+   https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/loader.js
    ```
+
 2. **悬浮球**：默认落在视口内（窄屏自动改大小 52px 并靠右下）；可拖动，拖过的位置会记住；视口变化后如果它被挤出屏幕，会自己拉回来。
 3. **拉黑**：长按某人头像约 0.55 秒 = 右键菜单（触屏没有右键）；也可以点悬浮球开面板，在「见过的人」里点拉黑。面板里的开关（启用屏蔽 / 调试日志 / 右键菜单 / 保留聊天记录 / 隐藏私聊会话条目）在触屏上点一次即生效。
 4. **排查手机端「不显示悬浮窗」**：注入 `mobile-probe.js`（同目录），它会在页面顶部挂一条红色横幅，直接写出：脚本跑在哪个上下文、视口多大、插件有没有落地、悬浮球在哪/被谁盖住、有没有脚本报错、`extJs` 里有没有地址。
@@ -171,8 +174,8 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 本项目的 token 与花费由脚本直查本机 Hermes 会话库生成（只读），明细在 [`docs/成本账.md`](docs/成本账.md)。
 
 <!-- COST:BEGIN 由 tools/token-report.py --readme 生成，别手改 -->
-- 截至 2026-09-25 20:39（北京时间）：估算花费 **$0.7611**（≈5 元人民币）· 消息 442 · 工具调用 218
-- 结构：主开发会话 $0.63 ／ 子 agent 独立审查 $0.09 ／ 部分相关折算 $0.04（明细见 [`docs/成本账.md`](docs/成本账.md)）
+- 截至 2026-09-25 20:47（北京时间）：估算花费 **$0.7734**（≈5 元人民币）· 消息 466 · 工具调用 228
+- 结构：主开发会话 $0.64 ／ 子 agent 独立审查 $0.09 ／ 部分相关折算 $0.04（明细见 [`docs/成本账.md`](docs/成本账.md)）
 - 口径：`estimated_cost_usd` 是**估算不是账单**；`reasoning_tokens` 通常已含在输出口径里；缓存读占 ~98%，所以「总 token 近亿」不等于贵。
 - 复现：`python tools/token-report.py`（屏幕）· `--doc docs/成本账.md`（重写成本账）· `--readme README.md`（刷新本段）
 <!-- COST:END -->
