@@ -1,5 +1,5 @@
 /*!
- * iirose 拉黑屏蔽 · 加载器（loader）v1.1 · 2026-09-25
+ * iirose 拉黑屏蔽 · 加载器（loader）v1.2 · 2026-09-25
  * 作者：Corvin Hermes（为北海做）
  *
  * 作用：**只注入这一个地址，就永远是最新版**。
@@ -14,7 +14,12 @@
  *      只要没打 tag，推到 main 的修复就送不到用户手里）；本文件地址若自己带了版本（如 `@v0.2.1/loader.js`），
  *      则尊重它、不插 `@main` —— 一句话：你钉版本就跟着钉，不钉就跟着 main；
  *   3. 请求主脚本时带 `?t=时间戳` —— 浏览器视为新地址，绕开那 7 天的缓存（jsdelivr 实测忽略查询串，照常返回文件）；
- *   4. 主脚本拉不到时自动换备用域名（fastly / gcore）再试一次。
+ *   4. **降级链**（按序尝试，前一个拉不到才试下一个）：
+ *        @main 主脚本 → 无 ref 主脚本（= 最新 tag 快照）→ 同上两条换 fastly / gcore 域名
+ *      为什么要有这一层：`@ref` 取文件要走 jsdelivr 回源，可能被限流或临时失败 ——
+ *      实测同一时刻我用 curl 连发请求时 `@main/xxx.js` 报 "Couldn't find the requested file"（拿 jquery@main 对照也一样 404），
+ *      而浏览器打开同一地址却是 200。所以那是**请求侧被限流**，不是仓库坏了；
+ *      但用户端遇上就是白屏，于是：**优先拿最新，拿不到就退到最新 tag 的快照**，保证总有一份能跑。
  *
  * 不做的（刻意的）：
  *   - 不做"后台静默热更新"：脚本一旦执行就不该被替换，刷新页面才换版（和任何注入脚本一样）；
@@ -49,20 +54,31 @@
     return self_src.replace(/[^/]*$/, '');          // 去掉文件名，保留目录（含协议与主机）
   })();
 
-  // 主脚本取址：jsdelivr 上显式钉 @main（本文件地址若已带 @版本，则尊重它）
-  var mainSrc = (function () {
+  // 主脚本取址：
+  //   - jsdelivr 上、且本文件地址没带版本 → 首选 dir@main/file（最新），次选 dir/file（最新 tag 快照）
+  //   - 本文件地址自带 @版本（用户钉了版本）→ 只按那个版本取
+  //   - 本地/其它主机 → 直接同目录取
+  var mainCandidates = (function () {
     var dir = base.replace(/\/$/, '');
-    if (/jsdelivr\.net/.test(base) && !/@[^/]+\/?$/.test(dir)) return dir + '@main/' + MAIN;
-    return base + MAIN;
+    if (/jsdelivr\.net/.test(base)) {
+      if (/@[^/]+\/?$/.test(dir)) return [base + MAIN];                    // 已钉版本：尊重它
+      return [dir + '@main/' + MAIN, dir + '/' + MAIN];                    // 先最新，再退到 tag 快照
+    }
+    return [base + MAIN];
   })();
+  var mainSrc = mainCandidates[0];
 
   var tried = 0;
   function candidates() {
-    var list = [mainSrc];
-    var host = mainSrc.match(/^https?:\/\/([^/]+)\//);
+    var list = mainCandidates.slice();
+    var host = base.match(/^https?:\/\/([^/]+)\//);
     if (host) {
       FALLBACK_HOSTS.forEach(function (h) {
-        if (h !== host[1]) list.push(mainSrc.replace(/^https?:\/\/[^/]+\//, location.protocol + '//' + h + '/'));
+        if (h !== host[1]) {
+          mainCandidates.forEach(function (u) {
+            list.push(u.replace(/^https?:\/\/[^/]+\//, location.protocol + '//' + h + '/'));
+          });
+        }
       });
     }
     return list;
@@ -84,7 +100,7 @@
     if (tried >= list.length) {
       try {
         console.warn('[拉黑/loader] 所有地址都加载失败（网络被拦或 CDN 不可达）。'
-          + '可临时改用直连地址：' + mainSrc + '?v=' + Date.now());
+          + '可临时改用直连地址：' + mainCandidates[mainCandidates.length - 1] + '?v=' + Date.now());
       } catch (e) { }
       return;
     }
