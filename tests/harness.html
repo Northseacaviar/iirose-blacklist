@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>iirose-blacklist 联调 harness（假 socket + 假 DOM）</title>
+<style>body{background:#111;color:#ddd;font:13px/1.5 Consolas,monospace}pre{white-space:pre-wrap}#box{padding:8px}</style>
+</head>
+<body>
+<div id="box">跑测试中…</div>
+
+<!-- 假 DOM：房间消息区 + 私聊会话列表（结构照 iiroseForge 依赖的选择器） -->
+<div class="msgholderBox" id="msgHolder">
+  <div class="msg" data-id="old000000002b_1700000000"><div class="wrap"><div class="msgavatar" data-uid="old000000002b"></div><div class="msgtext">旧消息</div></div></div>
+  <div class="pubMsgSystem"><div><div data-uid="keep00000004d">系统提示：某人进入房间</div></div></div>
+</div>
+<div id="pmList">
+  <div class="pmItem" ip="pmold0000003c"><span>私聊对象</span><i class="badge">2</i></div>
+  <div class="pmItem" ip="keep00000004d"><span>正常联系人</span></div>
+</div>
+
+<pre id="out"></pre>
+
+<script>
+try { localStorage.removeItem('iirose_blacklist_v1'); } catch (e) {}
+window.uid = 'myown0000001a';                 // 站点在 iframe 上挂的 window.uid（自己的 uid）
+
+const BLOCK = 'block0000005e', OTHER = 'other0000006f', RIGHT = 'right00000070';
+const OLD = 'old000000002b', PMOLD = 'pmold0000003c', KEEP = 'keep00000004d';
+window.__IDS = { BLOCK, OTHER, RIGHT, OLD, PMOLD, KEEP };
+
+// 假 socket：站点自己会把回调挂在 _onmessage 上
+window.__RECV = [];
+window.socket = {
+  _onmessage: function (data) { window.__RECV.push(data); },
+  _send: function () { },
+  send: function () { },
+  readyState: 1,
+};
+
+// 帧样本（格式取自官方文档；uid 用真实形态的 13 位小写字母数字）
+window.__FRAMES = {
+  room3: '"1700000001>http://av/1.jpg>甲>AAA>040b02>040b02>1>>' + OTHER + '>g>111'
+    + '<1700000002>http://av/2.jpg>乙>BBB>040b02>040b02>1>>' + BLOCK + '>g>222',
+  priv2: '""1700000101>' + BLOCK + '>乙>http://av/2.jpg>secret>339f88>>339f88>3>http://bg/1.png>333'
+    + '<1700000102>' + OTHER + '>甲>http://av/1.jpg>hi>339f88>>339f88>3>http://bg/2.png>444',
+  danmaku: '=乙>danmaku>040b02>040b02>1>http://av/1.jpg>1700000003>' + BLOCK + '>g>2325>f590',
+};
+</script>
+
+<!-- 加载真实插件（被测对象），不做任何改写；带时间戳绕开浏览器缓存，避免测到旧版 -->
+<script>document.write('<script src="../src/iirose-blacklist.js?t=' + Date.now() + '"><\/script>');</script>
+
+<script>
+const F = window.__FRAMES, ID = window.__IDS;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const results = [];
+function t(name, fn) { return Promise.resolve().then(fn).then(() => { results.push({ name, ok: true }); }, (e) => { results.push({ name, ok: false, err: String((e && e.message) || e) }); }); }
+function ok(v, m) { if (!v) throw new Error(m || '断言失败'); }
+function eq(a, b, m) { if (a !== b) throw new Error((m || 'eq') + ' 期望=' + JSON.stringify(b) + ' 实际=' + JSON.stringify(a)); }
+
+// 找到某个面板里、文字匹配的“最内层”元素（避免点到外层容器，之前的误报就是这么来的）
+function innermost(matcher, root) {
+  const all = Array.from((root || document).querySelectorAll('div,button'));
+  const hit = all.filter((e) => matcher(e));
+  return hit.find((e) => !hit.some((o) => o !== e && e.contains(o))) || hit[0] || null;
+}
+function panel() { return innermost((e) => /^已拉黑 \(\d+\)$/.test(e.textContent || '')) ? (innermost((e) => /^已拉黑 \(\d+\)$/.test(e.textContent || '')).parentElement) : null; }
+
+async function run() {
+  const A = window.__IIROSE_BLACKLIST__;
+  ok(A, '插件未加载：window.__IIROSE_BLACKLIST__ 不存在');
+
+  await t('W1 版本标记存在（区分"没加载/旧版"）', () => { eq(window.__IIROSE_BLACKLIST_VERSION__, A.version); });
+  await t('W2 socket._onmessage 已被挂载', () => { eq(A.hooked, true); });
+  await t('W3 链路活着：无关帧原样到达', () => {
+    window.__RECV.length = 0;
+    const m = '&1{"s":"//m.mp3","b":"@0"}';
+    window.socket._onmessage(m);
+    eq(window.__RECV[0], m);
+  });
+  await t('W4 拉黑前房间帧原样到达', () => {
+    window.__RECV.length = 0; window.socket._onmessage(F.room3); eq(window.__RECV[0], F.room3);
+  });
+  await t('W5 拉黑后：房间帧里该用户记录消失、他人记录保留且顺序不变', () => {
+    A.block(ID.BLOCK, '乙');
+    eq(A.isBlocked(ID.BLOCK), true);
+    window.__RECV.length = 0; window.socket._onmessage(F.room3);
+    eq(window.__RECV.length, 1);
+    ok(window.__RECV[0].indexOf(ID.BLOCK) < 0, '记录未剔除：' + window.__RECV[0]);
+    ok(window.__RECV[0].indexOf(ID.OTHER) > 0, '他人记录被误删');
+    eq(window.__RECV[0], '"1700000001>http://av/1.jpg>甲>AAA>040b02>040b02>1>>' + ID.OTHER + '>g>111');
+  });
+  await t('W6 私聊帧里被拉黑者记录消失、他人保留', () => {
+    window.__RECV.length = 0; window.socket._onmessage(F.priv2);
+    eq(window.__RECV.length, 1);
+    ok(window.__RECV[0].indexOf(ID.BLOCK) < 0, '私聊未屏蔽：' + window.__RECV[0]);
+    ok(window.__RECV[0].indexOf(ID.OTHER) > 0, '他人私聊被误删');
+  });
+  await t('W7 弹幕帧被整帧丢弃', () => {
+    window.__RECV.length = 0; window.socket._onmessage(F.danmaku); eq(window.__RECV.length, 0);
+  });
+  await t('W8 不能拉黑自己', () => {
+    A.block('myown0000001a', '我');
+    eq(A.isBlocked('myown0000001a'), false);
+  });
+
+  await t('W9 DOM 兜底：拉黑瞬间清掉该用户的历史消息', async () => {
+    A.block(ID.OLD, '旧用户');
+    A.block(ID.PMOLD, '私聊对象');
+    await sleep(300);
+    const h = document.getElementById('msgHolder');
+    ok(!h.querySelector('[data-id^="' + ID.OLD + '"]'), '历史消息仍在: ' + h.innerHTML.slice(0, 150));
+  });
+  await t('W10 私聊会话项 [ip=被拉黑者] 被隐藏、他人不受影响', async () => {
+    await sleep(300);
+    eq(document.querySelector('[ip="' + ID.PMOLD + '"]').style.display, 'none');
+    ok(document.querySelector('[ip="' + ID.KEEP + '"]').style.display !== 'none', '误伤正常联系人');
+  });
+  await t('W11 MutationObserver：新渲染的被拉黑消息被扫掉、他人保留', async () => {
+    const h = document.getElementById('msgHolder');
+    const bad = document.createElement('div');
+    bad.className = 'msg'; bad.dataset.id = ID.BLOCK + '_1700009999';
+    bad.innerHTML = '<div class="wrap"><div class="msgavatar" data-uid="' + ID.BLOCK + '"></div>blocked!</div>';
+    const good = document.createElement('div');
+    good.className = 'msg'; good.dataset.id = ID.OTHER + '_1700010000';
+    good.innerHTML = '<div class="wrap"><div class="msgavatar" data-uid="' + ID.OTHER + '"></div>fine</div>';
+    h.appendChild(bad); h.appendChild(good);
+    await sleep(700);
+    eq(h.querySelector('[data-id^="' + ID.BLOCK + '"]'), null, '新消息没扫掉');
+    ok(h.querySelector('[data-id^="' + ID.OTHER + '"]'), '正常消息被误删');
+  });
+  await t('W12 系统消息（非 .msg 结构）整行删掉', async () => {
+    const h = document.getElementById('msgHolder');
+    const sys = document.createElement('div');
+    sys.className = 'pubMsgSystem';
+    sys.innerHTML = '<div><div data-uid="' + ID.BLOCK + '">系统提示：乙进入房间</div></div>';
+    h.appendChild(sys);
+    await sleep(500);
+    ok(!h.contains(sys), '系统提示没删掉');
+  });
+  await t('W13 统计计数在涨', () => {
+    const c = A.store.counters;
+    ok(c.room >= 1 && c.priv >= 1 && c.danmaku >= 1 && c.dom >= 2, JSON.stringify(c));
+  });
+  await t('W14 名单落盘到 localStorage（刷新后仍生效）', () => {
+    const raw = JSON.parse(localStorage.getItem('iirose_blacklist_v1') || '{}');
+    ok(raw.uids && raw.uids[ID.BLOCK], '未落盘');
+    eq(raw.uids[ID.BLOCK].name, '乙');
+  });
+  await t('W15 seen 里不该出现自己，别人要记录', () => {
+    window.__RECV.length = 0;
+    window.socket._onmessage('"1700000010>http://av/9.jpg>我>me>040b02>040b02>1>>myown0000001a>g>999');
+    ok(!A.store.seen['myown0000001a'], '自己进了 seen');
+    ok(A.store.seen[ID.BLOCK] || A.store.seen[ID.OTHER], '别人没进 seen');
+  });
+
+  await t('W16 面板：悬浮球点开、名单条数、见到的名字带 uid', async () => {
+    const fab = innermost((e) => e.textContent === '🚫' && !e.querySelector('div'));
+    ok(fab, '找不到悬浮球');
+    fab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    await sleep(80);
+    const p = panel();
+    ok(p, '面板没打开');
+    eq(p.style.display, 'flex');
+    eq(innermost((e) => /^已拉黑 \(\d+\)$/.test(e.textContent || '')).textContent, '已拉黑 (3)', '名单条数不对：' + p.textContent.slice(0, 200));
+    ok(p.textContent.indexOf(ID.OLD) > 0 || p.textContent.indexOf(ID.BLOCK) > 0, '名单没显示 uid');
+  });
+  await t('W17 面板点「解除」后名单减少、私聊会话项恢复显示', async () => {
+    const p = panel();
+    const btn = innermost((e) => e.tagName === 'BUTTON' && e.textContent === '解除');
+    ok(btn, '没有解除按钮');
+    btn.click();
+    await sleep(200);
+    eq(A.isBlocked(ID.PMOLD), false, '解除的不是最早那条（应按时间倒序取第一条）');
+    await sleep(200);
+    eq(document.querySelector('[ip="' + ID.PMOLD + '"]').style.display, '');
+  });
+  await t('W18 面板按名字拉黑', async () => {
+    const p = panel();
+    const input = p.querySelector('input[placeholder]');
+    const btn = Array.from(p.querySelectorAll('button')).find((b) => b.textContent === '拉黑');
+    input.value = '甲';
+    btn.click();
+    await sleep(120);
+    eq(A.isBlocked(ID.OTHER), true, '按名字没能拉黑：' + p.textContent.slice(0, 200));
+  });
+  await t('W19 右键消息头像 -> 拉黑菜单可点生效', async () => {
+    const h = document.getElementById('msgHolder');
+    const node = document.createElement('div');
+    node.className = 'msg'; node.dataset.id = ID.RIGHT + '_1700008888';
+    node.innerHTML = '<div class="wrap"><div class="msgavatar" data-uid="' + ID.RIGHT + '"></div>右键我</div>';
+    h.appendChild(node);
+    const av = node.querySelector('.msgavatar');
+    av.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 120 }));
+    await sleep(60);
+    const menuBox = Array.from(document.querySelectorAll('div')).filter((e) => e.style.position === 'fixed' && /^拉黑 /.test(e.textContent || ''));
+    const item = menuBox.length ? menuBox[0].firstElementChild : null;
+    ok(item, '右键菜单没出现');
+    item.click();
+    await sleep(150);
+    eq(A.isBlocked(ID.RIGHT), true);
+    // 再右键一次应是「解除拉黑」
+    ok(!document.body.contains(item), '菜单没关掉');
+  });
+  await t('W20 dumpDom 探针可用（真机排障用）', () => {
+    const d = A.dumpDom();
+    eq(d.version, A.version); eq(d.msgholderBox, true); eq(d.myUid, 'myown0000001a');
+    ok(Array.isArray(d.blacklist) && d.blacklist.length >= 1, 'blacklist: ' + JSON.stringify(d.blacklist));
+  });
+  await t('W21 总开关关闭后所有帧都放行、DOM 也不再删', async () => {
+    A.store.enabled = false;
+    window.__RECV.length = 0; window.socket._onmessage(F.priv2); eq(window.__RECV[0], F.priv2);
+    const h = document.getElementById('msgHolder');
+    const n = document.createElement('div');
+    n.className = 'msg'; n.dataset.id = ID.BLOCK + '_1700020000';
+    n.innerHTML = '<div class="msgavatar" data-uid="' + ID.BLOCK + '"></div>x';
+    h.appendChild(n);
+    await sleep(500);
+    ok(h.contains(n), '关闭开关后仍被删');
+    A.store.enabled = true;
+  });
+
+  const fail = results.filter((r) => !r.ok);
+  const summary = { total: results.length, pass: results.length - fail.length, fail: fail.length, results };
+  window.__RESULT__ = summary;
+  document.getElementById('out').textContent = JSON.stringify(summary, null, 1);
+  document.getElementById('box').textContent = 'harness 完成：通过 ' + summary.pass + '/' + summary.total;
+}
+
+window.addEventListener('load', () => { run().catch((e) => { document.getElementById('out').textContent = 'runner 崩溃: ' + (e && e.stack || e); }); });
+</script>
+</body>
+</html>
