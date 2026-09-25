@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.1.5';
+  const VERSION = '0.1.6';
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -905,9 +905,21 @@
 
     document.body.appendChild(panel);
     document.body.appendChild(fab);
+    // 面板跟随悬浮球：悬浮球的位置一定点得到（否则面板根本打不开），
+    // 所以打开时把面板摆到悬浮球旁边 —— 万一原来那块区域被别的东西盖着，拖走悬浮球就能自救。
+    function placePanelNearFab() {
+      const fr = fab.getBoundingClientRect(), pr = panel.getBoundingClientRect();
+      let left = fr.left - pr.width - 12;
+      if (left < 4) left = Math.min(window.innerWidth - pr.width - 4, fr.right + 12);
+      let top = fr.top - 40;
+      top = Math.max(4, Math.min(top, Math.max(4, window.innerHeight - pr.height - 4)));
+      panel.style.left = Math.round(left) + 'px';
+      panel.style.top = Math.round(top) + 'px';
+    }
     makeDraggable(fab, fab, () => {
       panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
       if (panel.style.display === 'flex') {
+        placePanelNearFab();
         refreshAll();
         setTimeout(() => { try { selfCheck(); } catch (e) { noteError('自检失败', e); } }, 1200);
       }
