@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>child（被父页面覆盖层测试用的子页）</title></head>
+<body style="background:#1e1f26">
+<!-- 最小假 DOM：只为了插件能构建面板与 DOM 清扫路径 -->
+<div class="msgholderBox" id="msgHolder"></div>
+<div id="pmList"></div>
+<!-- 假 socket：让 hooked 为真（这里没登录，站点也会这样，正常） -->
+<script>
+  window.socket = { _onmessage: function () { } };
+  window.uid = 'self00000000';
+</script>
+<script src="../src/iirose-blacklist.js"></script>
+</body>
+</html>

@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.1.4';
+  const VERSION = '0.1.5';
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -1049,6 +1049,52 @@
         hitTest: hitTestControls,
         // 自检（打开面板时已自动跑过一次，结果同时写在面板底部状态行）
         selfCheck: selfCheck,
+        // 面板"看得见但点不动"的最后一招：把控件坐标映射到父页面（iframe 外）去查那个点上压着什么。
+        // 本页元素的 elementFromPoint 看不见 iframe 外面的东西 —— 如果父页面（或别的注入插件）有覆盖层，
+        // 渲染不受影响（所以面板看得见），点击却会被它接走。用悬浮球作为"已知能点"的参照点对比。
+        whoCovers: function () {
+          const out = { inIframe: false, iframeRect: null, iframeView: null, parentView: null, points: [] };
+          let fe = null, pd = null;
+          try {
+            fe = window.frameElement;
+            if (fe) { pd = window.parent && window.parent.document; }
+          } catch (e) { out.err = '跨域，读不到父页面：' + e.message; return out; }
+          if (!fe || !pd) return out;
+          out.inIframe = true;
+          const fr = fe.getBoundingClientRect();
+          out.iframeRect = [fr.left | 0, fr.top | 0, fr.width | 0, fr.height | 0];
+          out.iframeView = [window.innerWidth, window.innerHeight];
+          try { out.parentView = [window.parent.innerWidth, window.parent.innerHeight]; } catch (_) { }
+          const stackOf = (px, py) => {
+            try {
+              return pd.elementsFromPoint(px, py).map((e) => e.tagName
+                + (e.id ? '#' + e.id : '')
+                + (e.className ? '.' + String(e.className).slice(0, 28) : '')
+                + (e === fe ? ' <== 本插件所在的 iframe' : '')).slice(0, 5);
+            } catch (e) { return ['读不到：' + e.message]; }
+          };
+          const probe = (what, cx, cy) => {
+            const px = Math.round(fr.left + cx), py = Math.round(fr.top + cy);
+            const inFrame = document.elementFromPoint(cx, cy);
+            out.points.push({
+              what: what,
+              iframeXY: [Math.round(cx), Math.round(cy)],
+              parentXY: [px, py],
+              inFrame: inFrame ? (inFrame.tagName + (inFrame.className ? '.' + String(inFrame.className).slice(0, 22) : '')) : null,
+              parentStack: stackOf(px, py),
+            });
+          };
+          // 参照点：悬浮球（已知能点）
+          if (ui && ui.fab) {
+            const r = ui.fab.getBoundingClientRect();
+            probe('悬浮球(参照)', r.left + r.width / 2, r.top + r.height / 2);
+          }
+          hitTestControls().forEach((i) => {
+            if (i.clippedOut) return;
+            probe(i.what, i.rect[0] + 6, i.rect[1] + i.rect[3] / 2);
+          });
+          return out;
+        },
         // 手势记录：点几下之后跑这个，看事件走到了哪一层
         // 只有 window 有 → document 那层之前就断了；三层都有但没有 action 条目 → 事件到了、处理器没跑
         gestures: function () { return JSON.parse(JSON.stringify(gestures)); },
