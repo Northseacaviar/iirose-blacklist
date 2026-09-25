@@ -58,7 +58,8 @@ start.bat 本地托管（自定义 JS 注入调试用）
    （`extJs` 支持空格分隔多个地址，可与点歌插件同时注入）
 2. 朋友用：注入 jsdelivr 地址（发布后填）
 3. 界面：右下角悬浮球 🚫 → 面板；右键房间消息头像 → 直接拉黑
-4. 自测：`node tests/core.test.js`（核心逻辑 32 项）、浏览器打开 `tests/harness.html`（联调 24 项，含假 socket 重连自愈）
+4. 自测：`node tests/core.test.js`（核心逻辑 32 项）、浏览器打开 `tests/harness.html`（联调 27 项，含假 socket 重连自愈、"站点式 click preventDefault"下控件仍可用）
+5. 面板点不动时的排障：`__IIROSE_BLACKLIST__._diag.hitTest()` 看控件是否被盖住/尺寸归零；`__IIROSE_BLACKLIST__._diag.watchClick()` 装点击探针，再点一下开关，看控制台打出哪几层事件；`setEnabled/setDebug/setRightClick` 是不依赖鼠标的备用入口
 
 ## 真机待验证项（README 随代码更新）
 
@@ -71,5 +72,6 @@ start.bat 本地托管（自定义 JS 注入调试用）
 
 ## 版本
 
+- v0.1.2（2026-09-25）：修「面板里三个开关点不动」。真机实测根因：站点在 document 捕获阶段对 `click` 调 `preventDefault()`，把**原生控件的默认动作**取消了（事件本身照常传给我的处理器，所以按钮/右键菜单都正常，只有原生 checkbox 的勾选动作被吃掉）。修法：三个开关改成自绘方框 + 按下即触发（mouseup 与 click 双路 + 本次手势去重），不再依赖浏览器默认动作，也不再依赖原生控件渲染；整行可点、支持键盘。附带 `_diag.hitTest()` / `_diag.watchClick()` 两个排障探针与 `setEnabled/setDebug/setRightClick` 三个非鼠标入口。回归：核心 32/32、浏览器联调 27/27（本次新增 3 条覆盖"站点式拦截下仍可切换"），另用 CDP 可信鼠标事件逐行真点击验证
 - v0.1.1（2026-09-25）：独立审查后的加固 —— 分隔符错位不再漏拦也不再回拼畸形帧、重连自愈、落盘兜底、异常可见、原型污染、右键菜单开关、重复注入幂等。详见 `docs/审查报告-2026-09-25.md`
 - v0.1.0：MVP（协议级丢帧 + DOM 兜底 + 面板/右键入口）
