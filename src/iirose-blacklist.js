@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.2.1';
-  const VERSION_CODE = 16;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.2.2';
+  const VERSION_CODE = 17;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -95,6 +95,9 @@
    * ========================================================================== */
   // #region CORE
   const MAX_SEEN = 300;
+  // 配置结构版本：用来区分"用户显式选择"和"上一版的默认值"。
+  // v2 = 拉黑即清历史（消息 + 点播卡片）。老落盘没有这个字段 → 按新默认迁移（见 normalizeStore）。
+  const CONF_VERSION = 2;
 
   function defaultStore() {
     return {
@@ -105,6 +108,7 @@
       seen: Object.create(null),      // uid -> { name, ts }  最近见过的人（用于面板里按名字拉黑）
       counters: { room: 0, priv: 0, danmaku: 0, dom: 0, abnormal: 0, err: 0 },
       conf: {
+        confVersion: CONF_VERSION,   // 见顶部说明：用来区分"用户显式选择"与"上一版的默认值"
         rightClick: true,
         debug: false,
         panel: null,          // 用户拖到的面板位置（null=自动摆放）
@@ -133,10 +137,20 @@
     }
     for (const k in s.counters) if (typeof raw.counters?.[k] === 'number') s.counters[k] = raw.counters[k];
     if (raw.conf && typeof raw.conf === 'object') {
+      // 配置迁移（2026-09-25 真机反馈"卡片清了、文字还在"）：
+      // 老落盘里没有 confVersion —— 那时期的 keepHistory=true 是**上一版的默认值**，不是用户选择。
+      // 直接沿用会把新默认（拉黑即清历史）顶掉，症状恰好是"卡片清掉、文字留着"。所以没有版本号就迁到新默认并回写。
+      const legacy = typeof raw.conf.confVersion !== 'number';
       if (typeof raw.conf.rightClick === 'boolean') s.conf.rightClick = raw.conf.rightClick;
       if (typeof raw.conf.debug === 'boolean') s.conf.debug = raw.conf.debug;
-      if (typeof raw.conf.keepHistory === 'boolean') s.conf.keepHistory = raw.conf.keepHistory;
-      if (typeof raw.conf.clearCards === 'boolean') s.conf.clearCards = raw.conf.clearCards;
+      if (legacy) {
+        s.conf.keepHistory = false;      // 新默认：拉黑时清掉他的历史消息
+        s.conf.clearCards = true;        // 新默认：连历史点播卡片一起清
+        s.__migrated = true;             // 交给 loadStore 回写 + 打一行日志（这不是要落盘的字段，回写前会删）
+      } else {
+        if (typeof raw.conf.keepHistory === 'boolean') s.conf.keepHistory = raw.conf.keepHistory;
+        if (typeof raw.conf.clearCards === 'boolean') s.conf.clearCards = raw.conf.clearCards;
+      }
       if (typeof raw.conf.hideSession === 'boolean') s.conf.hideSession = raw.conf.hideSession;
       if (raw.conf.panel && typeof raw.conf.panel.left === 'number' && typeof raw.conf.panel.top === 'number') {
         s.conf.panel = { left: raw.conf.panel.left, top: raw.conf.panel.top };
@@ -330,6 +344,12 @@
       try { console.warn(TAG, '名单版本不是 1（读到 ' + raw.v + '），按当前结构尽力读取'); } catch (_) { }
     }
     store = normalizeStore(raw);
+    if (store.__migrated) {
+      delete store.__migrated;                       // 别把它落盘（normalizeStore 会忽略未知字段，但没必要写进去）
+      try { console.log(TAG, '旧版配置已迁移到新默认：拉黑时清掉他的历史消息 + 点播卡片（面板开关可改回）'); } catch (_) { }
+      saveStore();
+      try { sweepAll(); } catch (e) { noteError('迁移后清扫', e); }   // 立刻按新口径清一遍已有的被拉黑者历史
+    }
   }
 
   function saveStore() {

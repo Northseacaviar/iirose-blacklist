@@ -7,6 +7,8 @@
 </head>
 <body>
 <div id="out">跑中…</div>
+<!-- 期望版本由 tools/publish.js 生成（避免每次发版都要手改测试） -->
+<script src="expected-version.js"></script>
 <script>
   // 完全按朋友的用法：只注入这行地址（就是 extJs 里那一行）
   window.__LOADER_URL__ = 'https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/loader.js';
@@ -23,7 +25,7 @@
   const A = window.__IIROSE_BLACKLIST__;
   ok(!!A, 'CDN 上的 loader 成功把插件拉起来（朋友路径）');
   if (A) {
-    ok(A.version === '0.2.0', '版本 = ' + A.version + '（应是仓库当前最新）');
+    ok(A.version === window.__EXPECTED_VERSION__, '版本 = ' + A.version + '（期望 ' + window.__EXPECTED_VERSION__ + '，应是仓库当前最新）');
     ok(A.storage().mode === 'local', '注入形态下存储 = local，自检行会写明：' + A.storage().label);
     const srcs = [].slice.call(document.getElementsByTagName('script')).map((x) => x.src);
     const main = srcs.filter((u) => /iirose-blacklist\.js\?t=\d+$/.test(u))[0];

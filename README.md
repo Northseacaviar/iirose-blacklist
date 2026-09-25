@@ -145,7 +145,8 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
    （`extJs` 支持空格分隔多个地址，可与点歌插件同时注入）
 2. 朋友用：注入 loader 那一行（见上面「给朋友用」）
 3. 界面：右下角悬浮球 🚫 → 面板；右键房间消息头像 → 直接拉黑
-4. 自测：`node tests/core.test.js`（核心逻辑 39 项）、浏览器打开 `tests/harness.html`（联调 46 项）、`tests/official-mode.html`（官方形态 23 项）、`tests/loader-test.html`（loader 本地 6 项）与 `tests/loader-cdn.html`（loader 走 CDN = 朋友路径）
+4. 自测：`node tests/core.test.js`（核心逻辑 41 项）、浏览器打开 `tests/harness.html`（联调 47 项）、`tests/official-mode.html`（官方形态 23 项）、`tests/migration.html`（老配置迁移 7 项）、`tests/loader-test.html`（loader 本地 6 项）与 `tests/loader-cdn.html`（loader 走 CDN = 朋友路径）
+   - 两个 loader 测试页断言"拿到的版本 = 当前发布件版本"，期望值来自 `tests/expected-version.js`（由 `tools/publish.js` 生成，**别手改**，否则每次发版都得改测试）。
    - 注意：`official-mode.html` 里有一条断言是"官方形态下 localStorage 里不该有名单"。若在同一浏览器配置里先跑过 `harness.html`（它会往 localStorage 写名单），这条会假失败 —— 先 `localStorage.clear()` 再跑，或换无痕窗口。
 5. 面板点不动时的排障：`__IIROSE_BLACKLIST__._diag.hitTest()` 看控件是否被盖住/尺寸归零；`__IIROSE_BLACKLIST__._diag.watchClick()` 装点击探针，再点一下开关，看控制台打出哪几层事件；`setEnabled/setDebug/setRightClick/setKeepHistory/setClearCards/setHideSession` 是不依赖鼠标的备用入口（非布尔入参一律忽略，绝不会误切到会删记录的方向）；`sweep()` 可手动触发一次全扫，`debugSweep()` 逐行报告 DOM 清扫的判断结果（含 `card` 字段 = 该行是否算点播卡片行）
 
@@ -180,16 +181,22 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 本项目的 token 与花费由脚本直查本机 Hermes 会话库生成（只读），明细在 [`docs/成本账.md`](docs/成本账.md)。
 
 <!-- COST:BEGIN 由 tools/token-report.py --readme 生成，别手改 -->
-- 截至 2026-09-25 22:22（北京时间）：估算花费 **$1.0295**（≈7 元人民币）· 消息 339 · 工具调用 166
-- 结构：主开发会话 $0.90 ／ 子 agent 独立审查 $0.09 ／ 部分相关折算 $0.04（明细见 [`docs/成本账.md`](docs/成本账.md)）
+- 截至 2026-09-25 22:34（北京时间）：估算花费 **$1.0725**（≈8 元人民币）· 消息 431 · 工具调用 211
+- 结构：主开发会话 $0.94 ／ 子 agent 独立审查 $0.09 ／ 部分相关折算 $0.04（明细见 [`docs/成本账.md`](docs/成本账.md)）
 - 口径：`estimated_cost_usd` 是**估算不是账单**；`reasoning_tokens` 通常已含在输出口径里；缓存读占 ~98%，所以「总 token 近亿」不等于贵。
 - 复现：`python tools/token-report.py`（屏幕）· `--doc docs/成本账.md`（重写成本账）· `--readme README.md`（刷新本段）
 <!-- COST:END -->
 
 ## 版本
 
-**发布 tag**：`v0.2.0`（合规外壳）→ `v0.2.1`（loader v1）→ `v0.2.2`（loader v1.1 + vibecoding 署名）→ `v0.2.3`（loader v1.2 降级链 + 成本信息进文档）→ `v0.2.4`（插件 v0.2.1：拉黑即清历史 + 点播卡片）。
+**发布 tag**：`v0.2.0`（合规外壳）→ `v0.2.1`（loader v1）→ `v0.2.2`（loader v1.1 + vibecoding 署名）→ `v0.2.3`（loader v1.2 降级链 + 成本信息进文档）→ `v0.2.4`（插件 v0.2.1：拉黑即清历史 + 点播卡片）→ `v0.2.5`（插件 v0.2.2：老配置迁移，修"卡片清了、文字还在"）。
 **只有插件本体（`src/`）改动才升 `VERSION` 与 `VERSION_CODE`**（官方规范要求 versionCode 每次发布 +1）；loader 与文档改动不动插件版本。
+
+- 插件 v0.2.2（2026-09-25，真机复测后补）：**修"点歌卡片清了、文字消息还在"**。日志显示 v0.2.1 已生效（卡片被清），但文字照留 —— 根因是**老落盘里的 `conf.keepHistory: true` 是上一版的默认值**，被当成"用户的显式选择"沿用，把新默认顶掉了。
+  - 修法：引入 `confVersion`（`CONF_VERSION = 2`）。读盘时若 `conf` 里**没有** `confVersion`（= v0.2.1 及以前的落盘），就把 `keepHistory`/`clearCards` 迁到新默认并**回写落盘**（同时打一行控制台日志 + 立刻按新口径清扫一遍）；已经有 `confVersion` 的落盘则完全尊重用户选择，不再迁移。这样"新默认"和"用户显式改过"从此可分。
+  - 顺带修测试基建：`tools/publish.js` 现在还会生成 `tests/expected-version.js`（期望版本号），两个 loader 测试页用它断言版本 —— 之前版本号手写在测试里，发版必漏改（本次就漏了，`loader-test` 红了一格）。
+  - 新增测试页 `tests/migration.html`（预置老落盘 → 加载插件 → 断言已迁移 + 已回写 + 不弄丢名单/计数，7 项）。**该页踩到一个真实时序坑并写进注释**：插件读盘发生在初始化流程里，早断言会读到"还没读盘"的默认 store（默认值与迁移结果恰好都是 `keepHistory=false`，会**假通过**），所以断言前必须等到落盘记录真的出现在内存里。
+  - 回归：核心 41/41（新增配置迁移 6 项断言 + 期望版本文件一致性）、联调 47/47、官方形态 23/23、迁移页 7/7、loader 本地 6/6。
 
 - 插件 v0.2.1（2026-09-25，需求重新界定 + 真机反馈）：**每次拉黑都遍历聊天记录，清掉被拉黑者的历史消息与点播卡片**。
   需求原话（北海）："新增支持屏蔽被拉黑用户历史点歌卡片和消息的功能，可以在每次拉黑时遍历聊天记录，删除被拉黑用户的点歌卡片和历史消息"。
