@@ -76,6 +76,27 @@ function realClick(node) {
   node.dispatchEvent(new MouseEvent('mouseup', opts));
   node.dispatchEvent(new MouseEvent('click', opts));
 }
+// 指针捕获的忠实模型：真浏览器里 setPointerCapture 之后，pointerup 与"兼容鼠标"事件
+// 都会重定向到捕获元素 —— 被按下的子元素只收得到那一下 pointerdown。
+// 合成事件不会自动重定向，所以这里拦截 API 记录捕获者，再按同样规则派发。
+const CAPTURE = { el: null };
+(function patchCapture() {
+  if (!window.Element || !Element.prototype.setPointerCapture) return;
+  Element.prototype.setPointerCapture = function () { CAPTURE.el = this; };
+  Element.prototype.releasePointerCapture = function () { if (CAPTURE.el === this) CAPTURE.el = null; };
+})();
+function capturedGesture(pressNode) {
+  const o = { bubbles: true, cancelable: true, view: window, clientX: 0, clientY: 0, button: 0, buttons: 1 };
+  const P = (t, n) => { if (window.PointerEvent) n.dispatchEvent(new PointerEvent(t, Object.assign({ pointerId: 1, pointerType: 'mouse', isPrimary: true }, o))); };
+  CAPTURE.el = null;
+  P('pointerdown', pressNode);                 // 只有这一下必然到得了子元素
+  pressNode.dispatchEvent(new MouseEvent('mousedown', o));
+  const target = CAPTURE.el || pressNode;      // 被捕获了 → 后续都归捕获元素；没捕获 → 归原子元素
+  P('pointerup', target);
+  target.dispatchEvent(new MouseEvent('mouseup', o));
+  target.dispatchEvent(new MouseEvent('click', o));
+  CAPTURE.el = null;
+}
 function panel() { return innermost((e) => /^已拉黑 \(\d+\)$/.test(e.textContent || '')) ? (innermost((e) => /^已拉黑 \(\d+\)$/.test(e.textContent || '')).parentElement) : null; }
 
 async function run() {
@@ -564,6 +585,46 @@ async function run() {
     ok(!h.querySelector('[data-id^="' + uid + '"]'), '关掉保留后逐行清扫没删消息');
     A.setKeepHistory(true);
     A.unblock(uid);
+  });
+
+  await t('W41 点标题栏的 × 能关面板（按真实手势顺序：pointerdown 在 × 上、其后事件被标题栏捕获重定向）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    const p = panel();
+    ok(p, '面板没打开');
+    const fab = Array.from(document.querySelectorAll('div')).find((d) => d.textContent === '🚫' && d.style.borderRadius === '50%');
+    ok(fab, '没找到悬浮球');
+    const title = [...p.children].find((c) => /拉黑屏蔽 v/.test(c.textContent || ''));
+    const closeSpan = title && [...title.querySelectorAll('span')].find((e) => e.textContent === '×');
+    ok(closeSpan, '找不到 × 关闭按钮');
+    ok(Number(getComputedStyle(closeSpan).width.replace('px', '')) >= 20, '× 的点击区太小（触屏点不准）');
+    capturedGesture(closeSpan);
+    await sleep(150);
+    eq(p.style.display, 'none', '× 关不掉面板（指针捕获把 pointerup 截走了）');
+    realClick(fab); await sleep(200);
+    ok(p.style.display !== 'none', '再开面板失败');
+  });
+
+  await t('W42 面板矮（内容超出视口）时：名单不被挤成 0 高、面板可滚、解除键有实体（v0.1.12 回归）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    const p = panel();
+    ok(p, '面板没打开');
+    if (!A.isBlocked('blk00000001q')) A.block('blk00000001q', '测试乙');
+    A.setKeepHistory(true);
+    await sleep(150);
+    const head = innermost((e) => /^已拉黑 \(\d+\)$/.test(e.textContent || ''));
+    const blList = head.nextElementSibling;
+    const btn = blList.querySelector('button');
+    const realMax = p.style.maxHeight;
+    p.style.maxHeight = '300px';                       // 模拟矮视口（真机 iframe 就是这么矮）
+    await sleep(120);
+    const lh = blList.getBoundingClientRect().height;
+    ok(lh >= 20, '面板变矮后名单被挤成 ' + lh + 'px 高（应保持可读高度）');
+    ok(p.scrollHeight > p.clientHeight, '内容超出时面板不可滚动 —— 底部控件点不到');
+    const b = btn.getBoundingClientRect();
+    ok(b.height > 0 && b.width > 0, '解除按钮没有实体尺寸');
+    p.style.maxHeight = realMax;
+    await sleep(100);
+    A.unblock('blk00000001q');
   });
 
   const fail = results.filter((r) => !r.ok);
