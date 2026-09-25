@@ -71,9 +71,9 @@ start.bat 本地托管（自定义 JS 注入调试用）
 https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
 ```
 
-- 想固定版本不被自动更新：`.../iirose-blacklist@v0.1.11/iirose-blacklist.js`
+- 想固定版本不被自动更新：`.../iirose-blacklist@v0.1.13/iirose-blacklist.js`
 - 更新后「还是旧版」：`Ctrl+F5`；或给地址加查询串 `?v=2`（换成新数字即新 URL，CDN 忽略查询串照常返回文件）
-- 注入成功后右下角出现 🚫 悬浮球，控制台打印 `[iirose 拉黑] v0.1.11 已加载`；悬浮球可拖动，点击开面板
+- 注入成功后右下角出现 🚫 悬浮球，控制台打印 `[iirose 拉黑] v0.1.13 已加载`；悬浮球可拖动，点击开面板
 
 ## 使用
 
@@ -82,7 +82,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
    （`extJs` 支持空格分隔多个地址，可与点歌插件同时注入）
 2. 朋友用：注入 jsdelivr 地址（发布后填）
 3. 界面：右下角悬浮球 🚫 → 面板；右键房间消息头像 → 直接拉黑
-4. 自测：`node tests/core.test.js`（核心逻辑 35 项）、浏览器打开 `tests/harness.html`（联调 40 项，含假 socket 重连自愈、"站点式 click preventDefault"下控件仍可用）
+4. 自测：`node tests/core.test.js`（核心逻辑 35 项）、浏览器打开 `tests/harness.html`（联调 42 项，含假 socket 重连自愈、"站点式 click preventDefault"下控件仍可用）
 5. 面板点不动时的排障：`__IIROSE_BLACKLIST__._diag.hitTest()` 看控件是否被盖住/尺寸归零；`__IIROSE_BLACKLIST__._diag.watchClick()` 装点击探针，再点一下开关，看控制台打出哪几层事件；`setEnabled/setDebug/setRightClick/setKeepHistory/setHideSession` 是不依赖鼠标的备用入口（非布尔入参一律忽略，绝不会误切到会删记录的方向）；`sweep()` 可手动触发一次全扫，`debugSweep()` 逐行报告 DOM 清扫的判断结果
 
 ## 手机（触屏）怎么用
@@ -110,6 +110,11 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
 
 ## 版本
 
+- v0.1.13（2026-09-25）：**修两个真机反馈的 bug**（北海实测报回）:
+  ① **已拉黑名单显示不出来、点不到「解除」**：面板内容比视口高时（聊天 iframe 矮，实测 1280×420 与 390×340 都触发 —— 见 `maxHeight` 计算），两个名单是唯一可被 flex 压缩的子项，被挤成 0 高（按钮还在 DOM 里，只是被裁掉）。修法：面板本体改为**自身可滚动**（`overflowY:auto`）+ 两个名单 `min-height:46px` 且 `flex-shrink:0` → 内容再高也能滚到、名单永远可读。
+  ② **点标题栏的 × 关不掉面板**（只能点悬浮球）：标题栏同时是拖动把手，按住 × 时把手 `setPointerCapture` 把 `pointerup` 截走 → × 收不到抬手；紧随其后的 mouseup/click 又被 v0.1.10 加的"触屏兼容鼠标去重"（80ms）掐掉 → × 永远不触发。修法：把手内的可点控件（`[data-bl-nodrag]`）不启动拖动、不捕获指针；× 的点击区从 16px 字号无内边距放大到 34×30 起（触屏点得中）；另加 **Esc 关闭**作非鼠标退路。
+  - 测试盲区同批补上：新增 W41（**忠实模拟指针捕获**的手势顺序：pointerdown 在 × 上、其后事件按真浏览器规则重定向到捕获元素 —— 夹具为此新增 `setPointerCapture` 拦截模型）、W42（矮面板布局回归）。回归核心 35/35、联调 **42/42**；另用 CDP **真实鼠标点击**复核：× 真点击能关（修前实测"仍开着"）、矮视口下列表高 46px（修前 0）。
+  - 教训（已写进技能）：**合成 mouse 事件的夹具永远看不见指针捕获类 bug** —— 这类 bug 只有真实 pointer 序列或真机才能暴露
 - v0.1.12（2026-09-25）：**按独立审查意见加固**（报告与逐条复核见 `docs/审查报告-2026-09-25-v0111.md`）。修 4 处：
   ① 解除拉黑的文案与新默认行为矛盾（原写"旧消息已删，不会恢复"，默认已不删）→ 按当前模式分两种说法；
   ② API `setEnabled/setDebug/setRightClick/setKeepHistory/setHideSession` 传非布尔值（0/undefined/'yes'）不再被 truthy 强转 —— 原来 `setKeepHistory(0)` 会**静默推进"不可逆删除"模式**，现在非布尔一律忽略并返回当前值；

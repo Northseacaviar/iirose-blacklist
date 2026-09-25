@@ -1,5 +1,5 @@
 /*!
- * iirose 拉黑屏蔽 · iirose-blacklist v0.1.12
+ * iirose 拉黑屏蔽 · iirose-blacklist v0.1.13
  * 作者：Corvin Hermes（为北海做）
  *
  * 作用：在 iirose（蔷薇花园）里拉黑某人后 ——
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.1.12';
+  const VERSION = '0.1.13';
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -772,6 +772,10 @@
     try { handle.style.touchAction = 'none'; } catch (_) { }
     const start = (e) => {
       if (e.pointerType === 'mouse' && e.button) return;      // 只认左键
+      // 把手内有可点控件（标题栏的 × ）：从它上面按下不启动拖动，更不能 setPointerCapture ——
+      // 一旦捕获，子元素收不到 pointerup，紧随的 click 又被"触屏兼容鼠标"去重掐掉，
+      // 表现就是"点 × 没反应"（2026-09-25 真机 bug，合成 mouse 事件的测试测不出来）
+      if (e.target && e.target.closest && e.target.closest('[data-bl-nodrag]')) return;
       gid++; dragging = true; moved = 0;
       sx = e.clientX; sy = e.clientY;
       ox = node.offsetLeft; oy = node.offsetTop;
@@ -832,7 +836,8 @@
       position: 'fixed', left: (window.innerWidth - 360) + 'px', top: (window.innerHeight - 560) + 'px',
       width: '330px', maxHeight: Math.min(540, Math.max(200, window.innerHeight - 40)) + 'px', background: '#1e1f26', borderRadius: '10px',
       boxShadow: '0 4px 24px rgba(0,0,0,.6)', zIndex: Z, display: 'none',
-      flexDirection: 'column', overflow: 'hidden', color: '#eee',
+      // 内容比 maxHeight 高时让面板自己滚：子项（尤其两个名单）绝不会被挤成 0 高
+      flexDirection: 'column', overflowY: 'auto', overflowX: 'hidden', color: '#eee',
       fontFamily: 'PingFang SC, Microsoft YaHei, sans-serif', fontSize: '12px',
     });
 
@@ -841,7 +846,12 @@
       display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'grab', userSelect: 'none',
     });
     title.appendChild(el('span', null, '🚫 拉黑屏蔽 v' + VERSION));
-    const closeBtn = el('span', { cursor: 'pointer', color: '#888', fontSize: '16px' }, '×');
+    const closeBtn = el('span', {
+      cursor: 'pointer', color: '#888', fontSize: '18px', lineHeight: '1',
+      padding: '6px 10px', margin: '-6px -6px -6px 0', minWidth: '34px', textAlign: 'center',
+      flexShrink: '0', title: '关闭面板（Esc 也行；点悬浮球也能开合）',
+    }, '×');
+    closeBtn.setAttribute('data-bl-nodrag', '1');   // 告诉拖动把手：别在我身上启动拖动/指针捕获
     onPress(closeBtn, () => { panel.style.display = 'none'; });
     title.appendChild(closeBtn);
     panel.appendChild(title);
@@ -904,13 +914,13 @@
     // 已拉黑
     const blHead = el('div', { padding: '6px 12px', color: '#d98a86', fontWeight: '700', borderTop: '1px solid #2a2b33' }, '已拉黑 (0)');
     panel.appendChild(blHead);
-    const blList = el('div', { overflowY: 'auto', maxHeight: '170px' });
+    const blList = el('div', { overflowY: 'auto', maxHeight: '170px', minHeight: '46px', flexShrink: '0' });
     panel.appendChild(blList);
 
     // 最近出现
     const seenHead = el('div', { padding: '6px 12px', color: '#8aa0c9', fontWeight: '700', borderTop: '1px solid #2a2b33' }, '最近出现 (0)');
     panel.appendChild(seenHead);
-    const seenList = el('div', { overflowY: 'auto', maxHeight: '150px' });
+    const seenList = el('div', { overflowY: 'auto', maxHeight: '150px', minHeight: '46px', flexShrink: '0' });
     panel.appendChild(seenList);
 
     // 统计 + 底部按钮
@@ -1042,6 +1052,11 @@
 
     document.body.appendChild(panel);
     document.body.appendChild(fab);
+
+    // 非鼠标退路：Esc 关面板（× 在触屏上不好点时用得上）
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && panel.style.display !== 'none') { panel.style.display = 'none'; }
+    }, true);
 
     // 自愈：球被挤出视口/尺寸归零（手机视口变化、键盘弹出、站点重排）就拉回右下角
     function keepInView() {
