@@ -51,7 +51,8 @@
 
 ```
 src/      插件源码（单文件 IIFE，即成品）
-loader.js **给朋友的注入入口**：相对自身目录拉主脚本 + 时间戳绕缓存 + 备用域名兜底（改它才需要重新粘地址）
+loader.js **给朋友的注入入口**：相对自身目录拉主脚本 + 优先 @main + 降级到 tag 快照 + 时间戳绕缓存（改它才需要重新粘地址）
+mobile-probe.js 手机端排障探针：进站注入后页面顶部挂红条，直报上下文/视口/悬浮球位置/有没有脚本报错
 tests/    子测试：Node 单测（提取 #region CORE / #region STORAGE）+ 浏览器假 socket 联调 harness
           + official-mode.html（官方插件形态：假 Ext.Service，验合规与存储）
           + loader-test.html（loader 本地路径 6 项）+ loader-cdn.html（loader 走 CDN 实链 = 朋友路径）
@@ -66,10 +67,15 @@ start.bat 本地托管（自定义 JS 注入调试用）
 1. `node tools/publish.js` —— 把 `src/iirose-blacklist.js` 同步到 `release/` 与仓库根目录
    （jsdelivr 默认地址取的是仓库根那个文件；以前靠手工复制，忘一次就是"测试全过、朋友拿到旧版"）
 2. `node tests/core.test.js` + 浏览器开 `tests/harness.html`，两边全绿（核心单测里已加"发布件必须等于源码"这条，会兜住上面第 1 步忘做）
-3. `git add -A && git commit && git push`，然后 `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`
-4. 刷 jsdelivr 缓存（分支地址有小时级缓存，tag 地址不用刷）：
-   `curl "https://purge.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklist.js"`
-5. 复核：拉默认地址与 `@vX.Y.Z` 地址，比对 md5 与 `VERSION` 常量
+3. `git add -A && git commit && git push`
+4. **打 tag**（必须先打 —— 无 ref 的默认地址解析的是「最新 tag 的快照」，不打 tag 默认地址就不动、新文件还会 404）：
+   `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`
+5. 刷 jsdelivr 缓存（`@main`/分支地址有小时级缓存；tag 地址不用刷）。**必须带本地代理**，否则直连 purge 会静默失败（响应体是空的，地址悄悄停在上一版）：
+   `curl -x http://127.0.0.1:7897 "https://purge.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/loader.js"`
+6. 复核三条（**不能只看 curl 没报错**）：
+   ① `curl -sI <默认地址> | grep -i x-jsd-version` 看无 ref 地址解析到哪个版本（打完 tag 有分钟级延迟，可能得等几十秒再 purge 一次）
+   ② 默认地址与 `@vX.Y.Z` 地址的 md5、`VERSION` 常量一致
+   ③ `node tools/publish.js --check` 通过
 
 ## 官方插件规范对齐（2026-09-25 站长发布）
 
@@ -108,14 +114,13 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/loader.js
 - **降级链**：`@main` 拉不到时自动退到无 ref 地址（= 最新 tag 的快照），再不行换 fastly / gcore 域名 —— 因为 `@ref` 取文件要走回源、可能被限流（我实测过 curl 连发时报 "Couldn't find the requested file"，同时浏览器打开同一地址是 200），用户端遇上不能白屏。
 - 如果你注入的 loader 地址自己带了版本（`...@v0.2.3/loader.js`），就**钉在那个版本**、不跟 main —— 一句话：你钉版本就跟着钉，不钉就跟着 main。
 
-直连主脚本（老用法，仍然可用，但每次更新都要手动绕缓存；优先用带 `?v=N` 的地址，别裸用无 ref 地址）：
+直连主脚本（老用法；想自动更新就用上面的 loader，这条路每次更新都得自己动手）：
 
 ```
 https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklist.js
 ```
 
-- loader 自身也有浏览器缓存，但它是稳定文件、基本不需要改动；万一要改，我会顺手 purge。
-- 主脚本拉不到时会 console 报 `[拉黑/loader] 加载失败：<地址>` 并依次试备用域名，最后给出可临时直连的地址。
+- 主脚本拉不到时，loader 会在 console 报 `[拉黑/loader] 加载失败：<地址>`，依次试降级链里的下一个地址，最后给出可临时直连的地址。
 - 注入成功后右下角出现 🚫 悬浮球，控制台打印 `[iirose 拉黑] vX.Y.Z 已加载`；悬浮球可拖动，点击开面板。
 
 ## 怎么更新到最新版
@@ -127,9 +132,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 | 本地调试（`start.bat`） | 直接 `Ctrl+F5`，本地不经 CDN，没有 7 天缓存 |
 | 想固定某个版本 | 用 tag 地址：`.../iirose-blacklist@v0.2.3/loader.js`（或主脚本 `@v0.2.3/iirose-blacklist.js`）|
 
-为什么会有"缓存"这回事：浏览器把 jsdelivr 的地址缓存 **7 天**（地址一样就不去请求）。loader 用 `?t=时间戳` 让每次 URL 都不同，所以永远拿到新的（实测 jsdelivr 忽略查询串、照常返回文件）。
-
-另一个坑（实测）：jsdelivr 的**无 ref 默认地址**（`.../iirose-blacklist/xxx.js`）解析的是**最新 tag 的快照**，不是 main 分支 —— 所以新文件会 404、新提交要打完 tag 才出现在那里；这也是 loader 内部改走 `@main` 的原因。
+**为什么"刷新了还不生效"**：jsdelivr 给的是 7 天强缓存（`Cache-Control: max-age=604800` —— 地址不变，浏览器**根本不发请求**）。loader 靠 `?t=时间戳` 每次换 URL 绕开它；直连地址只能靠改 `?v=` 或 `Ctrl+F5`（手机用无痕）。另外两个坑（无 ref 地址 = 最新 tag 的快照、`@ref` 可能被限流）写在上面「给朋友用」那三条里。
 
 确认更新成功：面板标题显示版本号；或控制台 `__IIROSE_BLACKLIST__.version`；面板自检行还会写明「存储：官方 settings / 本地注入（localStorage）」。
 
@@ -138,7 +141,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 1. 本地调试：双击 `start.bat`（起 127.0.0.1:8770），站点内 console → `js -s` 开启 → `js` 粘贴
    `http://127.0.0.1:8770/src/iirose-blacklist.js`
    （`extJs` 支持空格分隔多个地址，可与点歌插件同时注入）
-2. 朋友用：注入 jsdelivr 地址（发布后填）
+2. 朋友用：注入 loader 那一行（见上面「给朋友用」）
 3. 界面：右下角悬浮球 🚫 → 面板；右键房间消息头像 → 直接拉黑
 4. 自测：`node tests/core.test.js`（核心逻辑 39 项）、浏览器打开 `tests/harness.html`（联调 43 项）、`tests/official-mode.html`（官方形态 23 项）、`tests/loader-test.html`（loader 本地 6 项）与 `tests/loader-cdn.html`（loader 走 CDN = 朋友路径）
 5. 面板点不动时的排障：`__IIROSE_BLACKLIST__._diag.hitTest()` 看控件是否被盖住/尺寸归零；`__IIROSE_BLACKLIST__._diag.watchClick()` 装点击探针，再点一下开关，看控制台打出哪几层事件；`setEnabled/setDebug/setRightClick/setKeepHistory/setHideSession` 是不依赖鼠标的备用入口（非布尔入参一律忽略，绝不会误切到会删记录的方向）；`sweep()` 可手动触发一次全扫，`debugSweep()` 逐行报告 DOM 清扫的判断结果
@@ -174,19 +177,22 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 本项目的 token 与花费由脚本直查本机 Hermes 会话库生成（只读），明细在 [`docs/成本账.md`](docs/成本账.md)。
 
 <!-- COST:BEGIN 由 tools/token-report.py --readme 生成，别手改 -->
-- 截至 2026-09-25 20:47（北京时间）：估算花费 **$0.7734**（≈5 元人民币）· 消息 466 · 工具调用 228
-- 结构：主开发会话 $0.64 ／ 子 agent 独立审查 $0.09 ／ 部分相关折算 $0.04（明细见 [`docs/成本账.md`](docs/成本账.md)）
+- 截至 2026-09-25 20:54（北京时间）：估算花费 **$0.7853**（≈6 元人民币）· 消息 484 · 工具调用 236
+- 结构：主开发会话 $0.66 ／ 子 agent 独立审查 $0.09 ／ 部分相关折算 $0.04（明细见 [`docs/成本账.md`](docs/成本账.md)）
 - 口径：`estimated_cost_usd` 是**估算不是账单**；`reasoning_tokens` 通常已含在输出口径里；缓存读占 ~98%，所以「总 token 近亿」不等于贵。
 - 复现：`python tools/token-report.py`（屏幕）· `--doc docs/成本账.md`（重写成本账）· `--readme README.md`（刷新本段）
 <!-- COST:END -->
 
 ## 版本
 
+**发布 tag**：`v0.2.0`（合规外壳）→ `v0.2.1`（loader v1）→ `v0.2.2`（loader v1.1 + vibecoding 署名）→ `v0.2.3`（loader v1.2 降级链 + 成本信息进文档）。
+**只有插件本体（`src/`）改动才升 `VERSION` 与 `VERSION_CODE`**（官方规范要求 versionCode 每次发布 +1）；loader 与文档改动不动插件版本。
+
 - loader v1.2（2026-09-25，独立于插件版本）：新增 `loader.js` 注入入口 —— 相对自身目录取主脚本、jsdelivr 上先取 `@main`（避开「无 ref 地址 = 最新 tag 快照」这个坑）、拉不到则**降级到最新 tag 快照**、`?t=时间戳` 绕开 7 天缓存、再失败换 fastly/gcore 域名、重复注入不重复拉、loader 地址自带版本则以版本为准。配套 `tests/loader-test.html`（本地 6 项）与 `tests/loader-cdn.html`（CDN 实链，含「主脚本确实走 @main」）。**用 loader 的用户以后不需要任何更新动作**。
 - v0.2.0（2026-09-25）：**按站长插件规范做合规外壳（双形态）**。新增 `#region STORAGE`：检测 `Ext.Service` 存在就用 `instance.settings` 存取并登记包信息（包名 `Northseacaviar.iiroseBlacklist`、12 项元信息、`privacy` 公示"本地读取消息内容用于过滤、不上报"、`versionCode` 数字递增、`outerLoad` 空串、`runAt: allReady`），不存在（当前注入形态）才退回 localStorage，并在**自检行**显示「存储：官方 settings / 本地注入（localStorage）」。新增 API `storage()` / `pkg()`。测试：核心 39 项（+4 条存储双形态）、联调 43 项（+W43）、新增 `tests/official-mode.html` 23 项（假 Ext.Service，验"官方形态下 localStorage 里不出现名单"）。图片（icon/cover/poster）与跨上下文适配按用户决定暂缓 —— 等站长开放提交通道再补。
 - v0.1.13（2026-09-25）：**修两个真机反馈的 bug**（北海实测报回；修完**真机验收通过**）:
   ① **已拉黑名单显示不出来、点不到「解除」**：面板内容比视口高时（聊天 iframe 矮，实测 1280×420 与 390×340 都触发 —— 见 `maxHeight` 计算），两个名单是唯一可被 flex 压缩的子项，被挤成 0 高（按钮还在 DOM 里，只是被裁掉）。修法：面板本体改为**自身可滚动**（`overflowY:auto`）+ 两个名单 `min-height:46px` 且 `flex-shrink:0` → 内容再高也能滚到、名单永远可读。
-  ② **点标题栏的 × 关不掉面板**（只能点悬浮球）：标题栏同时是拖动把手，按住 × 时把手 `setPointerCapture` 把 `pointerup` 截走 → × 收不到抬手；紧随其后的 mouseup/click 又被 v0.1.10 加的"触屏兼容鼠标去重"（80ms）掐掉 → × 永远不触发。修法：把手内的可点控件（`[data-bl-nodrag]`）不启动拖动、不捕获指针；× 的点击区从 16px 字号无内边距放大到 34×30 起（触屏点得中）；另加 **Esc 关闭**作非鼠标退路。
+  ② **点标题栏的 × 关不掉面板**（只能点悬浮球）：标题栏同时是拖动把手，按住 × 时把手 `setPointerCapture` 把 `pointerup` 截走 → × 收不到抬手；紧随其后的 mouseup/click 又被 v0.1.10 加的"触屏兼容鼠标去重"（80ms）掐掉 → × 永远不触发。修法：把手内的可点控件（`[data-bl-nodrag]`）不启动拖动、不捕获指针；× 的点击区从纯文字（16px、无内边距）放大到 18px 字号 + 6px/10px 内边距、最小宽 34px（点区约 34×30，触屏点得中）；另加 **Esc 关闭**作非鼠标退路。
   - 测试盲区同批补上：新增 W41（**忠实模拟指针捕获**的手势顺序：pointerdown 在 × 上、其后事件按真浏览器规则重定向到捕获元素 —— 夹具为此新增 `setPointerCapture` 拦截模型）、W42（矮面板布局回归）。回归核心 35/35、联调 **42/42**；另用 CDP **真实鼠标点击**复核：× 真点击能关（修前实测"仍开着"）、矮视口下列表高 46px（修前 0）。
   - 教训（已写进技能）：**合成 mouse 事件的夹具永远看不见指针捕获类 bug** —— 这类 bug 只有真实 pointer 序列或真机才能暴露
 - v0.1.12（2026-09-25）：**按独立审查意见加固**（报告与逐条复核见 `docs/审查报告-2026-09-25-v0111.md`）。修 4 处：
