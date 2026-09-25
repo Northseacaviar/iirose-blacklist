@@ -287,12 +287,32 @@ t('normalizeStore 保留新增的记录保留开关（否则用户关掉后刷�
   eq(d.conf.keepHistory, false, '默认应为"拉黑时清掉他的历史消息"（2026-09-25 需求重新界定）');
   eq(d.conf.hideSession, true, '默认隐藏会话条目');
   eq(d.conf.clearCards, true, '默认应清掉被拉黑者的历史点播卡片');
-  const a = L.normalizeStore({ conf: { keepHistory: true, hideSession: false, clearCards: false } });
+  const a = L.normalizeStore({ conf: { confVersion: 2, keepHistory: true, hideSession: false, clearCards: false } });
   eq(a.conf.keepHistory, true); eq(a.conf.hideSession, false); eq(a.conf.clearCards, false);
   const b = L.normalizeStore({ conf: { keepHistory: 'yes', hideSession: 1, clearCards: 0 } });
   eq(b.conf.keepHistory, false, '非法值应回落默认 false（默认即清历史）');
   eq(b.conf.hideSession, true, '非法值应回落默认 true');
   eq(b.conf.clearCards, true, '非法值应回落默认 true（绝不因误传变成"保留卡片"）');
+});
+
+t('配置迁移：老落盘（没有 confVersion）的 keepHistory=true 视作旧默认值，迁到新默认；已迁移过的显式选择必须尊重', () => {
+  const leg = L.normalizeStore({ conf: { keepHistory: true } });
+  eq(leg.conf.keepHistory, false, '老配置应迁到"拉黑即清历史"');
+  eq(leg.conf.clearCards, true, '老配置应带上"清卡片"新默认');
+  eq(leg.__migrated, true, '老配置应打迁移标记（loadStore 据此回写 + 打日志）');
+  eq(leg.conf.confVersion, 2, '迁移后要写上新配置版本号');
+
+  const v2 = L.normalizeStore({ conf: { confVersion: 2, keepHistory: true, clearCards: false } });
+  eq(v2.conf.keepHistory, true, '有 confVersion 的显式选择不能被迁移顶掉');
+  eq(v2.conf.clearCards, false, '同上：显式关掉清卡片也要尊重');
+  eq(!!v2.__migrated, false, '已迁移过的配置不该再迁移');
+
+  const fresh = L.normalizeStore({});
+  eq(fresh.conf.confVersion, 2, '新配置应带 confVersion');
+  eq(!!fresh.__migrated, false, '空输入（新用户）不算迁移');
+  const noConf = L.normalizeStore({ uids: { abcde123456: { name: '甲', ts: 1 } } });
+  eq(!!noConf.__migrated, false, '连 conf 都没有的落盘也不该打迁移标记');
+  eq(!!noConf.uids.abcde123456, true, '迁移逻辑不能弄丢名单');
 });
 
 t('发布件与源码一致：仓库根/release 的 iirose-blacklist.js 必须等于 src（防"发布件落后于源码"）', () => {
@@ -302,6 +322,17 @@ t('发布件与源码一致：仓库根/release 的 iirose-blacklist.js 必须�
   const src = norm('src/iirose-blacklist.js');
   eq(norm('release/iirose-blacklist.js') === src, true, 'release/ 里的发布件落后于 src/（跑 node tools/publish.js）');
   eq(norm('iirose-blacklist.js') === src, true, '仓库根目录的发布件落后于 src/（跑 node tools/publish.js）');
+});
+
+t('测试页的期望版本文件与源码一致（它由 tools/publish.js 生成，防"发版忘了生成"）', () => {
+  const fs = require('fs'), path = require('path');
+  const root = path.join(__dirname, '..');
+  const src = fs.readFileSync(path.join(root, 'src/iirose-blacklist.js'), 'utf8');
+  const ver = (src.match(/const VERSION = '([^']+)'/) || [])[1];
+  ok(ver, '源码里找不到 VERSION');
+  const exp = fs.readFileSync(path.join(root, 'tests/expected-version.js'), 'utf8');
+  ok(exp.indexOf('"' + ver + '"') >= 0 || exp.indexOf("'" + ver + "'") >= 0,
+    'tests/expected-version.js 没跟上源码版本 ' + ver + '（跑 node tools/publish.js）');
 });
 
 t('官方形态：Ext.Service.install 收到合规的包信息，且存储走 settings、绝不碰 localStorage', () => {

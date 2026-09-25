@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>配置迁移（老落盘 → 新默认）</title>
+<style>
+  body { background:#1b1c22; color:#ddd; font:14px/1.6 Consolas,monospace; padding:16px; }
+  #box { font-weight:700; margin-bottom:10px; }
+  #out { white-space:pre-wrap; color:#9ab; }
+</style>
+</head>
+<body>
+<div id="box">跑中…</div>
+<pre id="out"></pre>
+
+<!-- 1) 先预置"老落盘"：来自 v0.1.11~v0.2.1 时期 —— 没有 confVersion，
+        conf.keepHistory 是当时的默认值 true（真机症状：卡片清了、文字还在） -->
+<script>
+localStorage.setItem('iirose_blacklist_v1', JSON.stringify({
+  v: 1,
+  enabled: true,
+  uids: { mig000000001a: { name: '甲', ts: 1700000000000 } },
+  seen: { mig000000002b: { name: '乙', ts: 1700000000001 } },
+  counters: { room: 3, priv: 0, danmaku: 0, dom: 0, abnormal: 0, err: 0 },
+  conf: { rightClick: true, debug: false, keepHistory: true, hideSession: true },
+}));
+</script>
+
+<!-- 2) 加载真实插件（不做任何改写，带时间戳绕缓存） -->
+<script>document.write('<script src="../src/iirose-blacklist.js?t=' + Date.now() + '"><\/script>');</script>
+
+<!-- 3) 断言：老配置必须被迁到新默认，并回写落盘（否则每次刷新都会拿旧默认顶掉新行为） -->
+<script>
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const results = [];
+function t(name, fn) {
+  return Promise.resolve().then(fn).then(() => { results.push({ name, ok: true }); },
+    (e) => { results.push({ name, ok: false, err: String((e && e.message) || e) }); });
+}
+function ok(v, m) { if (!v) throw new Error(m || '断言失败'); }
+function eq(a, b, m) { if (a !== b) throw new Error((m || 'eq') + ' 期望=' + JSON.stringify(b) + ' 实际=' + JSON.stringify(a)); }
+
+async function run() {
+  const A = window.__IIROSE_BLACKLIST__;
+  await t('插件已加载', () => ok(A, 'window.__IIROSE_BLACKLIST__ 不存在'));
+
+  // 时序坑：插件的读盘（loadStore）发生在初始化流程里，不一定在脚本求值那一刻完成 ——
+  // 早断言会读到"还没读盘"的默认 store（默认值与迁移结果恰好同为 keepHistory=false，会假通过）。
+  // 所以先等到落盘里的记录真的出现在内存里，再开始断言。
+  await t('等待插件完成读盘（落盘记录进入内存）', async () => {
+    for (let i = 0; i < 40; i++) {
+      if (A.store.seen['mig000000002b'] || A.store.uids['mig000000001a']) return;
+      await sleep(100);
+    }
+    throw new Error('3 秒内没读到落盘（loadStore 没跑？）');
+  });
+
+  await t('老配置的 keepHistory=true 被迁成新默认 false（拉黑即清历史）', () => {
+    eq(A.store.conf.keepHistory, false, '没迁移 —— 真机就会"卡片清了、文字还在"');
+  });
+  await t('clearCards 带上新默认 true', () => eq(A.store.conf.clearCards, true));
+  await t('confVersion 已写成 2（以后不再重复迁移）', () => eq(A.store.conf.confVersion, 2));
+  await t('迁移不弄丢名单/最近出现/计数', () => {
+    ok(A.isBlocked('mig000000001a'), '黑名单丢了');
+    ok(A.store.seen['mig000000002b'], '最近出现记录丢了');
+    eq(A.store.counters.room, 3, '计数丢了');
+  });
+  await sleep(500);                                  // 等 saveStore 的 200ms 防抖落盘
+  await t('迁移结果已回写落盘，且不把 __migrated 写进去', () => {
+    const raw = JSON.parse(localStorage.getItem('iirose_blacklist_v1') || '{}');
+    eq(raw.conf && raw.conf.confVersion, 2, '没回写 confVersion');
+    eq(raw.conf.keepHistory, false, '没回写新的 keepHistory');
+    eq(!!raw.__migrated, false, '__migrated 被落盘了（脏字段）');
+  });
+
+  const fail = results.filter((r) => !r.ok);
+  window.__RESULT__ = { total: results.length, pass: results.length - fail.length, fail: fail.length, results };
+  document.getElementById('box').textContent = '配置迁移：通过 ' + (results.length - fail.length) + '/' + results.length;
+  document.getElementById('out').textContent = JSON.stringify(window.__RESULT__, null, 1);
+}
+run().catch((e) => { document.getElementById('out').textContent = 'runner 崩溃: ' + (e && e.stack || e); });
+</script>
+</body>
+</html>

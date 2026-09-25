@@ -20,9 +20,11 @@
   }
 </script>
 
+<!-- 期望版本由 tools/publish.js 生成（避免每次发版都要手改测试） -->
+<script src="expected-version.js"></script>
+
 <!-- 方式一：相对路径加载（本地 = 与 CDN 同构：loader 自己取自己的目录） -->
 <script src="../loader.js"></script>
-
 <script>
 (async function () {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -32,7 +34,7 @@
   const A = window.__IIROSE_BLACKLIST__;
   ok(!!A, 'loader 相对路径加载成功，插件已就绪');
   if (A) {
-    ok(A.version === '0.2.0', '拿到的版本 = ' + A.version + '（与仓库根发布件一致）');
+    ok(A.version === window.__EXPECTED_VERSION__, '拿到的版本 = ' + A.version + '（期望 ' + window.__EXPECTED_VERSION__ + '，与仓库根发布件一致）');
     ok(A.storage().mode === 'local', '注入形态下存储 = local');
     A.block('loadertest01', 'loader 测试');
     await wait(500);
