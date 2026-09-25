@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.1.6';
+  const VERSION = '0.1.7';
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -36,7 +36,7 @@
       uids: Object.create(null),      // uid -> { name, ts }  黑名单
       seen: Object.create(null),      // uid -> { name, ts }  最近见过的人（用于面板里按名字拉黑）
       counters: { room: 0, priv: 0, danmaku: 0, dom: 0, abnormal: 0, err: 0 },
-      conf: { rightClick: true, debug: false },
+      conf: { rightClick: true, debug: false, panel: null },   // panel: 用户拖到的面板位置（null=自动摆放）
     };
   }
 
@@ -58,6 +58,9 @@
     if (raw.conf && typeof raw.conf === 'object') {
       if (typeof raw.conf.rightClick === 'boolean') s.conf.rightClick = raw.conf.rightClick;
       if (typeof raw.conf.debug === 'boolean') s.conf.debug = raw.conf.debug;
+      if (raw.conf.panel && typeof raw.conf.panel.left === 'number' && typeof raw.conf.panel.top === 'number') {
+        s.conf.panel = { left: raw.conf.panel.left, top: raw.conf.panel.top };
+      }
     }
     return s;
   }
@@ -524,6 +527,7 @@
    * UI
    * ========================================================================== */
   let ui = null;
+  let lastPlacement = '';      // 上次面板摆放的结论（自检行会显示），放模块作用域给 selfCheck 用
 
   const Z = '2147483000';
   function el(tag, style, text) {
@@ -587,6 +591,41 @@
     if (panel) bind('panel', panel, false);
   }
 
+  // ===== 父页面侧判定：iframe 内某坐标上的点击，到底会不会落进 iframe =====
+  // iframe 自己的 elementFromPoint 看不见外面（这正是"17 个控件命中正常却点不动"的原因），
+  // 所以要把坐标映射到父页面去看：父页面在该点的最上层元素如果就是我们的 iframe 元素，才说明点击进得来。
+  // 同源才读得到父页面；跨域或读不到就一律当作"点得到"（宁可不动，也不要瞎挪）。
+  function parentDocument() {
+    try {
+      if (!window.frameElement) return null;
+      return (window.parent && window.parent.document) || null;
+    } catch (_) { return null; }
+  }
+  function pointReachesIframe(cx, cy) {
+    const pd = parentDocument();
+    if (!pd) return true;
+    try {
+      const fe = window.frameElement;
+      const fr = fe.getBoundingClientRect();
+      const top = pd.elementFromPoint(Math.round(fr.left + cx), Math.round(fr.top + cy));
+      if (!top) return true;
+      return top === fe || (top.contains && top.contains(fe));   // 父页面该点最上层是我们这个 iframe
+    } catch (_) { return true; }
+  }
+  function rectReachesIframe(r) {
+    if (!r || r.width < 5 || r.height < 5) return false;
+    const pts = [[r.left + 8, r.top + 8], [r.left + r.width / 2, r.top + r.height / 2], [r.left + r.width - 8, r.top + r.height - 8]];
+    // 每个开关行/按钮也各点一下
+    if (ui && ui.panel) {
+      Array.prototype.forEach.call(ui.panel.querySelectorAll('[data-bl-key],button'), (n) => {
+        const b = n.getBoundingClientRect();
+        if (b.top >= r.top - 1 && b.bottom <= r.bottom + 1) pts.push([b.left + Math.min(b.width / 2, 30), b.top + b.height / 2]);
+      });
+    }
+    for (let i = 0; i < pts.length; i++) if (!pointReachesIframe(pts[i][0], pts[i][1])) return false;
+    return true;
+  }
+
   // ===== 控件自检：面板上每个开关行/按钮到底能不能点到 =====
   // 被祖先 overflow 裁掉（名单太长滚出可视区）不算"被盖住"，要分开报，否则真机会误报一片、把真问题埋掉
   function clippedByAncestor(n, x, y) {
@@ -634,7 +673,7 @@
     log(line);
     // 写进常驻自检行（不是状态行——状态行会被后续操作覆盖，结论就丢了）
     if (ui && ui.diagLine) {
-      ui.diagLine.textContent = line + (bad.length ? '' : '（点不动就右键开关行，或跑 _diag.gestures()）');
+      ui.diagLine.textContent = line + (lastPlacement ? '｜面板位置：' + lastPlacement : '') + (bad.length ? '' : '（点不动就右键开关行，或跑 _diag.gestures()）');
       ui.diagLine.style.setProperty('color', bad.length ? '#d0a04a' : '#7f8794', 'important');
     }
     return { line: line, info: info };
@@ -679,7 +718,7 @@
     return row;
   }
 
-  function makeDraggable(node, handle, onClick) {
+  function makeDraggable(node, handle, onClick, onDrop) {
     let sx = 0, sy = 0, ox = 0, oy = 0, moved = 0, dragging = false;
     handle.addEventListener('mousedown', (e) => {
       dragging = true; moved = 0;
@@ -696,6 +735,7 @@
     });
     document.addEventListener('mouseup', () => {
       if (dragging && moved < 5 && onClick) onClick();
+      else if (dragging && moved >= 5 && onDrop) onDrop(node.offsetLeft, node.offsetTop);
       dragging = false;
     });
   }
@@ -905,26 +945,55 @@
 
     document.body.appendChild(panel);
     document.body.appendChild(fab);
-    // 面板跟随悬浮球：悬浮球的位置一定点得到（否则面板根本打不开），
-    // 所以打开时把面板摆到悬浮球旁边 —— 万一原来那块区域被别的东西盖着，拖走悬浮球就能自救。
-    function placePanelNearFab() {
-      const fr = fab.getBoundingClientRect(), pr = panel.getBoundingClientRect();
-      let left = fr.left - pr.width - 12;
-      if (left < 4) left = Math.min(window.innerWidth - pr.width - 4, fr.right + 12);
-      let top = fr.top - 40;
+    // 摆放策略：① 记住的（用户拖到的）位置 → ② 悬浮球旁边 → ③ 四角，取第一个"点得到"的。
+    // 为什么：真机上证实过——面板停在某块区域时点击会被别的元素接走（看得见、点不动），
+    // 而悬浮球所在的区域必定点得到（否则面板根本打不开），所以以它为中心往外找。
+    function setPanelPos(left, top) {
+      const pr = panel.getBoundingClientRect();
+      left = Math.max(4, Math.min(left, Math.max(4, window.innerWidth - pr.width - 4)));
       top = Math.max(4, Math.min(top, Math.max(4, window.innerHeight - pr.height - 4)));
       panel.style.left = Math.round(left) + 'px';
       panel.style.top = Math.round(top) + 'px';
     }
+    function placePanel() {
+      const pr = panel.getBoundingClientRect();
+      const fr = fab.getBoundingClientRect();
+      const W = pr.width, H = pr.height;
+      const saved = store.conf.panel;                       // 用户上次拖到的位置
+      const cands = [];
+      if (saved && typeof saved.left === 'number') cands.push([saved.left, saved.top, '上次的位置']);
+      cands.push([fr.left - W - 12, fr.top - 40, '悬浮球左侧']);
+      cands.push([fr.right + 12, fr.top - 40, '悬浮球右侧']);
+      cands.push([fr.left, fr.top - H - 12, '悬浮球上方']);
+      cands.push([fr.left, fr.bottom + 12, '悬浮球下方']);
+      cands.push([8, 8, '左上角']);
+      cands.push([window.innerWidth - W - 8, 8, '右上角']);
+      let chosen = null;
+      for (let i = 0; i < cands.length; i++) {
+        setPanelPos(cands[i][0], cands[i][1]);
+        if (rectReachesIframe(panel.getBoundingClientRect())) { chosen = cands[i]; break; }
+      }
+      if (!chosen) {                                        // 全被盖住（不该发生）：退回记住的位置或悬浮球左侧
+        const fall = saved && typeof saved.left === 'number' ? [saved.left, saved.top] : [fr.left - W - 12, fr.top - 40];
+        setPanelPos(fall[0], fall[1]);
+        chosen = ['', '', '都点不到，已退回默认位置'];
+      }
+      lastPlacement = chosen[2];
+      return chosen[2];
+    }
     makeDraggable(fab, fab, () => {
       panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
       if (panel.style.display === 'flex') {
-        placePanelNearFab();
+        placePanel();                                     // 摆放要在显示之后量尺寸，故放在这里
         refreshAll();
         setTimeout(() => { try { selfCheck(); } catch (e) { noteError('自检失败', e); } }, 1200);
       }
     });
-    makeDraggable(panel, title);
+    makeDraggable(panel, title, null, (left, top) => {
+      store.conf.panel = { left: left, top: top };        // 用户拖过就记住，下次打开先试这个位置
+      saveStore();
+      statusMsg('面板位置已记住', '#68b26d');
+    });
 
     ui = { panel, fab, setStatus, refreshAll, refreshSeen, refreshStats, refreshBlacklist, diagLine };
     refreshAll();
@@ -1096,6 +1165,10 @@
               parentStack: stackOf(px, py),
             });
           };
+          if (arguments.length >= 2) {                       // whoCovers(x, y)：查任意一个 iframe 内坐标
+            probe('自定义点', arguments[0], arguments[1]);
+            return out;
+          }
           // 参照点：悬浮球（已知能点）
           if (ui && ui.fab) {
             const r = ui.fab.getBoundingClientRect();

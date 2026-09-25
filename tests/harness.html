@@ -390,6 +390,39 @@ async function run() {
     eq(A.store.enabled, before, '再右键应切回');
   });
 
+  await t('W31 面板开在悬浮球旁边（而不是固定在右下角）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.store.conf.panel = null;                       // 清掉记位置，走自动摆放
+    const p = panel();
+    ok(p, '面板没打开');
+    p.style.display = 'none';
+    const fab = Array.from(document.querySelectorAll('div')).find((d) => d.textContent === '🚫' && d.style.borderRadius === '50%');
+    ok(fab, '没找到悬浮球');
+    realClick(fab);                                  // 关闭→再打开，触发重新摆放
+    await sleep(120);
+    p.style.display = 'none';
+    realClick(fab);
+    await sleep(200);
+    const fr = fab.getBoundingClientRect(), pr = p.getBoundingClientRect();
+    const near = (Math.abs(pr.right - fr.left) < 30) || (Math.abs(pr.left - fr.right) < 30)
+      || (Math.abs(pr.bottom - fr.top) < 30) || (Math.abs(pr.top - fr.bottom) < 30);
+    ok(near, '面板离悬浮球太远：面板' + JSON.stringify([pr.left | 0, pr.top | 0]) + ' 悬浮球' + JSON.stringify([fr.left | 0, fr.top | 0]));
+  });
+
+  await t('W32 用户拖到的位置会被记住并复用', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.store.conf.panel = { left: 60, top: 70 };
+    const p = panel();
+    p.style.display = 'none';
+    const fab = Array.from(document.querySelectorAll('div')).find((d) => d.textContent === '🚫' && d.style.borderRadius === '50%');
+    realClick(fab);
+    await sleep(200);
+    const pr = p.getBoundingClientRect();
+    eq(Math.round(pr.left), 60, '没沿用记住的 left');
+    eq(Math.round(pr.top), 70, '没沿用记住的 top');
+    A.store.conf.panel = null;
+  });
+
   const fail = results.filter((r) => !r.ok);
   const summary = { total: results.length, pass: results.length - fail.length, fail: fail.length, results };
   window.__RESULT__ = summary;

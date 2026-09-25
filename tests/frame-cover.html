@@ -7,9 +7,10 @@
   body { margin: 0; font: 13px/1.6 "Microsoft YaHei", sans-serif; background: #111; color: #ddd; }
   #wrap { position: relative; width: 1000px; height: 620px; margin: 12px; }
   iframe { width: 100%; height: 100%; border: 1px solid #444; background: #1e1f26; }
-  /* 父页面层的透明覆盖层：盖住右下角一块区域（模拟别的插件/站点留下的透明层）。
-     它不改变视觉，但会接走这一区域的点击 —— iframe 内部的 elementFromPoint 看不见它。 */
-  #cover { position: absolute; right: 0; bottom: 0; width: 420px; height: 560px; background: rgba(255,0,0,0.06); z-index: 999999; }
+  /* 父页面层的透明覆盖层：盖住"面板默认位置的上半部分"（也就是开关那几行所在区域），
+     但不盖悬浮球所在的位置 —— 真机现象就是：悬浮球点得动（面板能打开），开关点不动。
+     它不改变视觉，却会接走这一区域的点击；iframe 内部的 elementFromPoint 看不见它。 */
+  #cover { position: absolute; left: 580px; top: 60px; width: 420px; height: 280px; background: rgba(255,0,0,0.06); z-index: 999999; }
   #cover.none { display: none; }
   #bar { margin: 12px; }
   button { font: inherit; padding: 4px 10px; }
