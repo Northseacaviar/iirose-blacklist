@@ -2,6 +2,11 @@
 
 在 iirose（蔷薇花园）里拉黑某人后：**同一房间里看不到 TA 的头像和消息，私聊消息也不再收到**。
 
+> **本项目是 vibecoding（AI 结对开发）的产物**
+> - 人类作者（需求、拍板、真机验收）：**北海** —— GitHub [@Northseacaviar](https://github.com/Northseacaviar)
+> - AI 助手（读规范、写代码、写测试、发版）：**Corvin Hermes**（中文名 *Hermes 玄翎*，基于 [Nous Research 的 Hermes Agent](https://hermes-agent.nousresearch.com/)）
+> - 分工：人给需求、人拍方案、人真机验收；AI 负责实现、自跑测试（Node 单测 + 浏览器联调 + 变异测试）与发布。每版都留测试证据，跑不通就如实说。
+
 ## 需求（2026-09-25 北海提出）
 
 要做的：
@@ -97,10 +102,15 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/loader.js
 
 **推荐用这一行（loader）**：它每次都用带时间戳的地址去拉主脚本，所以**以后我发新版，你什么都不用做，刷新页面就是最新版** —— 不用重新粘贴、不用改 `?v=` 数字、不用手动刷 CDN。CDN 拉不到时会自动换备用域名（fastly / gcore）再试一次。
 
-直连主脚本（老用法，仍然可用，但每次更新都要手动绕缓存）：
+两个实测出来的细节（写下来免得再踩）：
+
+- loader 在 jsdelivr 上**显式取 `@main` 分支**：因为**无 ref 的默认地址解析的是「最新 tag 的快照」**，只要我没打 tag，推到 main 的修复就送不到用户手里。
+- 如果你注入的 loader 地址自己带了版本（`...@v0.2.2/loader.js`），就**钉在那个版本**、不跟 main —— 一句话：你钉版本就跟着钉，不钉就跟着 main。
+
+直连主脚本（老用法，仍然可用，但每次更新都要手动绕缓存；推荐用 `@main`，别用无 ref 地址）：
 
 ```
-https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
+https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklist.js
 ```
 
 - loader 自身也有浏览器缓存，但它是稳定文件、基本不需要改动；万一要改，我会顺手 purge。
@@ -114,9 +124,11 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
 | **loader（推荐）** | 什么都不用做，**刷新页面**即最新版（F5；手机下拉刷新/切页也行） |
 | 直连 `iirose-blacklist.js` | ① 把地址里 `?v=` 的数字改大（新数字=新 URL，浏览器必须重新下载，CDN 忽略查询串照常返回最新文件）② 在站点的自定义 JS 里**重新粘贴一次**（地址存在 `extJs` 里，不重粘永远只认旧地址） |
 | 本地调试（`start.bat`） | 直接 `Ctrl+F5`，本地不经 CDN，没有 7 天缓存 |
-| 想固定某个版本 | 用 tag 地址：`.../iirose-blacklist@v0.2.0/iirose-blacklist.js` |
+| 想固定某个版本 | 用 tag 地址：`.../iirose-blacklist@v0.2.2/loader.js`（或主脚本 `@v0.2.2/iirose-blacklist.js`）|
 
-为什么会有"缓存"这回事：浏览器把 jsdelivr 的分支地址缓存 **7 天**（地址一样就不去请求）。loader 用 `?t=时间戳` 让每次 URL 都不同，所以永远拿到新的。
+为什么会有"缓存"这回事：浏览器把 jsdelivr 的地址缓存 **7 天**（地址一样就不去请求）。loader 用 `?t=时间戳` 让每次 URL 都不同，所以永远拿到新的（实测 jsdelivr 忽略查询串、照常返回文件）。
+
+另一个坑（实测）：jsdelivr 的**无 ref 默认地址**（`.../iirose-blacklist/xxx.js`）解析的是**最新 tag 的快照**，不是 main 分支 —— 所以新文件会 404、新提交要打完 tag 才出现在那里；这也是 loader 内部改走 `@main` 的原因。
 
 确认更新成功：面板标题显示版本号；或控制台 `__IIROSE_BLACKLIST__.version`；面板自检行还会写明「存储：官方 settings / 本地注入（localStorage）」。
 
@@ -155,7 +167,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
 
 ## 版本
 
-- loader v1（2026-09-25，独立于插件版本）：新增 `loader.js` 注入入口 —— 相对自身目录取主脚本、`?t=时间戳` 绕开 jsdelivr 分支地址 7 天缓存、失败自动换 fastly/gcore 域名，重复注入不重复拉。配套 `tests/loader-test.html`（本地 6 项）与 `tests/loader-cdn.html`（CDN 实链 4 项）。**用 loader 的用户以后不需要任何更新动作**。
+- loader v1.1（2026-09-25，独立于插件版本）：新增 `loader.js` 注入入口 —— 相对自身目录取主脚本、jsdelivr 上显式取 `@main`（避开「无 ref 地址 = 最新 tag 快照」这个坑）、`?t=时间戳` 绕开 7 天缓存、失败自动换 fastly/gcore 域名、重复注入不重复拉、loader 地址自带版本则以版本为准。配套 `tests/loader-test.html`（本地 6 项）与 `tests/loader-cdn.html`（CDN 实链，含「主脚本确实走 @main」）。**用 loader 的用户以后不需要任何更新动作**。
 - v0.2.0（2026-09-25）：**按站长插件规范做合规外壳（双形态）**。新增 `#region STORAGE`：检测 `Ext.Service` 存在就用 `instance.settings` 存取并登记包信息（包名 `Northseacaviar.iiroseBlacklist`、12 项元信息、`privacy` 公示"本地读取消息内容用于过滤、不上报"、`versionCode` 数字递增、`outerLoad` 空串、`runAt: allReady`），不存在（当前注入形态）才退回 localStorage，并在**自检行**显示「存储：官方 settings / 本地注入（localStorage）」。新增 API `storage()` / `pkg()`。测试：核心 39 项（+4 条存储双形态）、联调 43 项（+W43）、新增 `tests/official-mode.html` 23 项（假 Ext.Service，验"官方形态下 localStorage 里不出现名单"）。图片（icon/cover/poster）与跨上下文适配按用户决定暂缓 —— 等站长开放提交通道再补。
 - v0.1.13（2026-09-25）：**修两个真机反馈的 bug**（北海实测报回；修完**真机验收通过**）:
   ① **已拉黑名单显示不出来、点不到「解除」**：面板内容比视口高时（聊天 iframe 矮，实测 1280×420 与 390×340 都触发 —— 见 `maxHeight` 计算），两个名单是唯一可被 flex 压缩的子项，被挤成 0 高（按钮还在 DOM 里，只是被裁掉）。修法：面板本体改为**自身可滚动**（`overflowY:auto`）+ 两个名单 `min-height:46px` 且 `flex-shrink:0` → 内容再高也能滚到、名单永远可读。

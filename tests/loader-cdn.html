@@ -28,6 +28,7 @@
     const srcs = [].slice.call(document.getElementsByTagName('script')).map((x) => x.src);
     const main = srcs.filter((u) => /iirose-blacklist\.js\?t=\d+$/.test(u))[0];
     ok(!!main && /cdn\.jsdelivr\.net/.test(main), '主脚本走 CDN + 时间戳绕缓存：' + (main || '没找到'));
+    ok(!!main && /@main\/iirose-blacklist\.js/.test(main), 'jsdelivr 上显式取 @main 分支（不落在 tag 快照上）：' + (main || ''));
   }
   document.getElementById('out').innerHTML = lines.join('<br>') + '<br><br><b>' + (fail ? ('失败 ' + fail + ' 项') : '全部通过') + '</b>';
   window.__RESULT__ = { total: lines.length, fail: fail };
