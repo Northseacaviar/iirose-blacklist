@@ -245,6 +245,17 @@ t('normalizeStore 保留面板位置（否则拖到的位置落盘后会丢）',
   eq(c.conf.panel, null);
 });
 
+t('normalizeStore 保留新增的记录保留开关（否则用户关掉后刷新又变回默认）', () => {
+  const d = L.normalizeStore({});
+  eq(d.conf.keepHistory, true, '默认应保留历史');
+  eq(d.conf.hideSession, true, '默认隐藏会话条目');
+  const a = L.normalizeStore({ conf: { keepHistory: false, hideSession: false } });
+  eq(a.conf.keepHistory, false); eq(a.conf.hideSession, false);
+  const b = L.normalizeStore({ conf: { keepHistory: 'yes', hideSession: 1 } });
+  eq(b.conf.keepHistory, true, '非法值应回落默认 true');
+  eq(b.conf.hideSession, true, '非法值应回落默认 true');
+});
+
 console.log('\n== 结果 ==');
 console.log('通过 ' + pass + ' / 失败 ' + fail);
 if (failures.length) { console.log('失败明细:'); failures.forEach(f => console.log('  - ' + f)); process.exit(1); }
