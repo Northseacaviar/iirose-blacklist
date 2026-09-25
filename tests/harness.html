@@ -116,7 +116,9 @@ async function run() {
     eq(A.isBlocked('myown0000001a'), false);
   });
 
-  await t('W9 DOM 兜底：拉黑瞬间清掉该用户的历史消息', async () => {
+  await t('W9 DOM 兜底：关掉「保留聊天记录」后，拉黑瞬间清掉该用户的历史消息（旧行为，可切换）', async () => {
+    eq(A.store.conf.keepHistory !== false, true, 'v0.1.11 起默认应保留历史（不删已有记录）');
+    A.setKeepHistory(false);                             // 显式关掉，才走旧的删除路径
     A.block(ID.OLD, '旧用户');
     A.block(ID.PMOLD, '私聊对象');
     await sleep(300);
@@ -273,7 +275,10 @@ async function run() {
     const p = panel();
     ok(p, '面板没打开');
     const rows = Array.from(p.querySelectorAll('[data-bl-key]'));
-    eq(rows.length, 3, '应有 启用屏蔽/右键菜单/调试 三个开关行，实际 ' + rows.length);
+    ['enabled', 'debug', 'rightClick', 'keepHistory', 'hideSession'].forEach((k) => {
+      ok(rows.some((r) => r.dataset.blKey === k), '缺开关行：' + k);
+    });
+    eq(rows.length, 5, '开关行数应为 5，实际 ' + rows.length);
     const rcRow = p.querySelector('[data-bl-key="rightClick"]');
     ok(rcRow, '找不到"右键头像弹拉黑菜单"开关行');
     eq(rcRow.querySelector('span').textContent, '✓', '开关默认应为开（方框里应有勾）');
@@ -421,6 +426,57 @@ async function run() {
     eq(Math.round(pr.left), 60, '没沿用记住的 left');
     eq(Math.round(pr.top), 70, '没沿用记住的 top');
     A.store.conf.panel = null;
+  });
+
+  await t('W33 默认保留聊天记录：拉黑后已有/新渲染的消息都不被删（需求变更主用例）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    A.setKeepHistory(true);                              // W9 为覆盖旧路径把它关掉了，这里开回来
+    eq(A.store.conf.keepHistory, true, '保留历史应为开');
+    if (!A.isBlocked(ID.BLOCK)) A.block(ID.BLOCK, '乙');
+    const h = document.getElementById('msgHolder');
+    const n = document.createElement('div');
+    n.className = 'msg'; n.dataset.id = ID.BLOCK + '_1700099001';
+    n.innerHTML = '<div class="wrap"><div class="msgavatar" data-uid="' + ID.BLOCK + '"></div>留着</div>';
+    h.appendChild(n);
+    await sleep(900);                                    // 等 MutationObserver 那趟跑过
+    ok(h.querySelector('[data-id^="' + ID.BLOCK + '"]'), '默认保留历史时不该删已有消息');
+    const sys = document.createElement('div');
+    sys.className = 'pubMsgSystem';
+    sys.innerHTML = '<div><div data-uid="' + ID.BLOCK + '">系统提示</div></div>';
+    h.appendChild(sys);
+    await sleep(700);
+    ok(h.contains(sys), '默认保留历史时不该删系统消息行');
+    n.parentNode && n.parentNode.removeChild(n);
+    sys.parentNode && sys.parentNode.removeChild(sys);
+  });
+
+  await t('W34 关掉「保留聊天记录」：旧行为（清掉已有消息）立刻回来', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    const h = document.getElementById('msgHolder');
+    const n = document.createElement('div');
+    n.className = 'msg'; n.dataset.id = ID.BLOCK + '_1700099002';
+    n.innerHTML = '<div class="wrap"><div class="msgavatar" data-uid="' + ID.BLOCK + '"></div>删我</div>';
+    h.appendChild(n);
+    A.setKeepHistory(false);                             // 内部会立刻全扫一次
+    await sleep(600);
+    ok(!h.querySelector('[data-id="' + ID.BLOCK + '_1700099002"]'), '关掉保留后应清掉已有消息');
+    A.setKeepHistory(true);                              // 恢复默认，别影响收尾状态
+  });
+
+  await t('W35 「隐藏私聊会话条目」开关双向生效', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    if (!A.isBlocked(ID.PMOLD)) A.block(ID.PMOLD, '私聊对象');
+    A.setHideSession(true);
+    await sleep(200);
+    const sess = document.querySelector('[ip="' + ID.PMOLD + '"]');
+    ok(sess, '找不到会话项');
+    eq(sess.style.display, 'none', '打开开关后会话项应隐藏');
+    A.setHideSession(false);
+    await sleep(200);
+    ok(sess.style.display !== 'none', '关掉开关后会话项应恢复显示');
+    A.setHideSession(true);
+    await sleep(150);
   });
 
   const fail = results.filter((r) => !r.ok);

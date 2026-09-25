@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.1.10';
+  const VERSION = '0.1.11';
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -36,7 +36,14 @@
       uids: Object.create(null),      // uid -> { name, ts }  黑名单
       seen: Object.create(null),      // uid -> { name, ts }  最近见过的人（用于面板里按名字拉黑）
       counters: { room: 0, priv: 0, danmaku: 0, dom: 0, abnormal: 0, err: 0 },
-      conf: { rightClick: true, debug: false, panel: null },   // panel: 用户拖到的面板位置（null=自动摆放）
+      conf: {
+        rightClick: true,
+        debug: false,
+        panel: null,          // 用户拖到的面板位置（null=自动摆放）
+        // 拉黑只拦新消息、不动已有记录（2026-09-25 北海定的默认行为）
+        keepHistory: true,    // true=不删已渲染的历史消息（房间+私聊）；false=拉黑瞬间清掉旧消息（v0.1.10 及以前的行为）
+        hideSession: true,    // true=隐藏被拉黑者的私聊会话条目；false=列表里保留，可点开
+      },
     };
   }
 
@@ -58,6 +65,8 @@
     if (raw.conf && typeof raw.conf === 'object') {
       if (typeof raw.conf.rightClick === 'boolean') s.conf.rightClick = raw.conf.rightClick;
       if (typeof raw.conf.debug === 'boolean') s.conf.debug = raw.conf.debug;
+      if (typeof raw.conf.keepHistory === 'boolean') s.conf.keepHistory = raw.conf.keepHistory;
+      if (typeof raw.conf.hideSession === 'boolean') s.conf.hideSession = raw.conf.hideSession;
       if (raw.conf.panel && typeof raw.conf.panel.left === 'number' && typeof raw.conf.panel.top === 'number') {
         s.conf.panel = { left: raw.conf.panel.left, top: raw.conf.panel.top };
       }
@@ -413,7 +422,7 @@
     Array.prototype.forEach.call(list, (n) => {
       const uid = n.getAttribute('ip');
       if (!looksLikeUid(uid)) return;
-      const hide = store.enabled && isBlocked(uid);
+      const hide = store.enabled && store.conf.hideSession !== false && isBlocked(uid);   // 关掉开关就顺带把之前隐藏的恢复（下面 else 分支）
       if (hide && !n.hasAttribute('data-bl-hidden')) {
         n.setAttribute('data-bl-prev-display', n.style.display || '');   // 记住站点自己设的原值，恢复时写回
         n.setAttribute('data-bl-hidden', '1');
@@ -452,6 +461,7 @@
       const hit = !!(uid && store.enabled && isBlocked(uid));
       diag.hits.push({ uid: uid, blocked: hit, hasParent: !!row.parentNode, sameAsRoot: row === root });
       if (hit) {
+        if (store.conf.keepHistory !== false) { diag.kept = true; return; }   // 默认：只记诊断，不删已有记录
         if (row.parentNode) { row.parentNode.removeChild(row); removed++; addCounter('dom'); }
       }
     });
@@ -462,6 +472,7 @@
 
   function sweepMessages() {
     let removed = 0;
+    if (store.conf.keepHistory !== false) return 0;      // 默认保留历史：整段跳过
     try {
       const boxes = document.getElementsByClassName('msgholderBox');
       for (let b = 0; b < boxes.length; b++) {
@@ -857,6 +868,21 @@
     });
     panel.appendChild(rcToggle);
 
+    // 记录保留（2026-09-25 需求：拉黑时不要删掉已有记录，只拦新消息）
+    const keepToggle = toggleRow('keepHistory', '保留聊天记录（不删历史消息）', store.conf.keepHistory !== false, (on) => {
+      store.conf.keepHistory = on; saveStore();
+      setStatus(on ? '拉黑只拦新消息，已有记录都留着' : '已关闭保留：拉黑会清掉已有历史消息（不可逆）', on ? '#68b26d' : '#d0a04a');
+      setTimeout(() => { if (!on) sweepAll(); }, 50);      // 关掉的瞬间按旧行为清一次
+    });
+    panel.appendChild(keepToggle);
+
+    const sessToggle = toggleRow('hideSession', '隐藏私聊会话条目', store.conf.hideSession !== false, (on) => {
+      store.conf.hideSession = on; saveStore();
+      setStatus(on ? '被拉黑者的私聊会话条目会隐藏' : '私聊会话条目保留，可从列表点开', '#999');
+      hideSessionNodes();
+    });
+    panel.appendChild(sessToggle);
+
     // 添加
     const addRow = el('div', { display: 'flex', gap: '6px', padding: '10px 12px 6px' });
     const input = el('input', {
@@ -980,7 +1006,8 @@
       stats.textContent = t;
       // 真机上"看不到效果"的头号原因就是没挂上或落盘失败，这里必须显式显示
       const msgs = [];
-      if (!isHooked()) msgs.push('⚠ 收包过滤未挂载（未登录？）——新消息不会被拦，只有历史清扫生效');
+      if (!isHooked()) msgs.push('⚠ 收包过滤未挂载（未登录？）——新消息不会被拦'
+        + (store.conf.keepHistory === false ? '，只有历史清扫生效' : '，历史清扫也关着（当前等于没生效）'));
       if (saveFailed) msgs.push('⚠ 名单落盘失败（本次会话内仍生效）');
       if (c.err) msgs.push('存在内部异常 ' + c.err + ' 次（详见控制台）');
       if (msgs.length) { warn.textContent = msgs.join('；'); warn.style.display = 'block'; }
@@ -994,6 +1021,8 @@
       enableToggle.__set(store.enabled);
       debugToggle.__set(!!store.conf.debug);
       rcToggle.__set(store.conf.rightClick !== false);
+      keepToggle.__set(store.conf.keepHistory !== false);
+      sessToggle.__set(store.conf.hideSession !== false);
     }
 
     const doAdd = () => {
@@ -1226,6 +1255,8 @@
       setEnabled: function (v) { store.enabled = !!v; saveStore(); if (ui) ui.refreshAll(); return store.enabled; },
       setDebug: function (v) { store.conf.debug = !!v; saveStore(); if (ui) ui.refreshAll(); return store.conf.debug; },
       setRightClick: function (v) { store.conf.rightClick = !!v; saveStore(); if (ui) ui.refreshAll(); return store.conf.rightClick; },
+      setKeepHistory: function (v) { store.conf.keepHistory = !!v; saveStore(); if (ui) ui.refreshAll(); if (!store.conf.keepHistory) sweepAll(); return store.conf.keepHistory; },
+      setHideSession: function (v) { store.conf.hideSession = !!v; saveStore(); if (ui) ui.refreshAll(); hideSessionNodes(); return store.conf.hideSession; },
       block: block,
       unblock: unblock,
       isBlocked: isBlocked,
