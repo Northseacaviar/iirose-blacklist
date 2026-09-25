@@ -1,5 +1,5 @@
 /*!
- * iirose 拉黑屏蔽 · iirose-blacklist v0.1.0
+ * iirose 拉黑屏蔽 · iirose-blacklist v0.1.1
  * 作者：Corvin Hermes（为北海做）
  *
  * 作用：在 iirose（蔷薇花园）里拉黑某人后 ——
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -32,9 +32,10 @@
     return {
       v: 1,
       enabled: true,
-      uids: {},                       // uid -> { name, ts }  黑名单
-      seen: {},                       // uid -> { name, ts }  最近见过的人（用于面板里按名字拉黑）
-      counters: { room: 0, priv: 0, danmaku: 0, dom: 0 },
+      // 用 null 原型：uid 恰好是 '__proto__'/'constructor' 时才会真的成为 own 键（普通对象会写到原型上，静默失效）
+      uids: Object.create(null),      // uid -> { name, ts }  黑名单
+      seen: Object.create(null),      // uid -> { name, ts }  最近见过的人（用于面板里按名字拉黑）
+      counters: { room: 0, priv: 0, danmaku: 0, dom: 0, abnormal: 0, err: 0 },
       conf: { rightClick: true, debug: false },
     };
   }
@@ -94,15 +95,32 @@
     return typeof u === 'string' && u.length >= 5 && u.length <= 40 && /^[0-9a-zA-Z_@-]+$/.test(u);
   }
 
+  // 记录形状校验：用来判断 '<' 切分出来的片段到底是不是一条完整记录。
+  // 只靠"字段数够不够放 uid"不够——私聊帧 uid 在下标 1，残片照样有 2 个以上字段。
+  // 所以用两条硬特征：记录以数字消息id 开头；uid 位置（房间 [8] / 私聊 [1]）是 uid 形态。
+  // 残片（如 "b>339f88>>…"、"3 is true>040b02>…"）必然过不了这两条。
+  function isRecordShaped(f, kind) {
+    if (kind === 'danmaku') return true;                 // 弹幕单条，不参与 '<' 切分
+    if (!/^\d{6,}$/.test(f[0] || '')) return false;      // 消息 id 必须是数字
+    return looksLikeUid(f[kind === 'room' ? 8 : 1]);     // uid 位置必须是 uid 形态
+  }
+
   /**
    * 帧结构（官方文档 + iiroseForge 生产验证）：
    *   房间消息 `"`  + rec1<rec2<…   rec 字段：0 消息id | 1 头像 | 2 用户名 | 3 内容 | 4 颜色 | 5 颜色 | 6 | 7 | 8 uid | 9 头衔 | 10 随机数
    *   私聊     `""` + rec1<rec2<…   rec 字段：0 消息id | 1 发送者uid | 2 用户名 | 3 头像 | 4 内容 | 5 颜色 | 6 | 7 颜色 | 8 | 9 背景图 | 10 随机数
    *   弹幕     `=`  + 单条记录      字段：0 用户名 | 1 内容 | 2 颜色 | 3 颜色 | 4 | 5 头像 | 6 消息id | 7 uid | 8 头衔 | …
-   * 返回 { data, changed, blocked[] }；data 为 null 表示整帧丢弃。
+   *
+   * 分隔符风险：`<` 是记录分隔符、`>` 是字段分隔符，两者若出现在字段内容里，切分就会错位。
+   * 官方 note_escape_character.md 给出上行转义表（" & < >），但下行帧是否一定已转义无法保证
+   * （第三方客户端/机器人可以发原始字符）。所以这里做两件事：
+   *   1) 每个片段做形状校验（isRecordShaped），任一片段不合格 → 本帧切分不可信（suspect）；
+   *   2) 切分不可信时**绝不回拼**（回拼会把半截畸形记录交给站点解析器）：命中即整帧丢弃；
+   *      按下标没命中时再用「令牌级」复查，命中同样整帧丢弃 —— 宁可丢这一帧也不放行被拉黑者。
+   * 返回 { data, changed, blocked[], abnormal }；data 为 null 表示整帧丢弃。
    */
   function filterFrame(data, store, hooks) {
-    const out = { data: data, changed: false, blocked: [], kind: null };
+    const out = { data: data, changed: false, blocked: [], kind: null, abnormal: false };
     if (typeof data !== 'string' || data.length < 2) return out;
 
     let head, kind, uidIdx, nameIdx, multi = true;
@@ -119,9 +137,11 @@
     const body = data.slice(head.length);
     const recs = multi ? body.split('<') : [body];
     const kept = [];
+    let suspect = false;
     for (let i = 0; i < recs.length; i++) {
       const rec = recs[i];
       const f = rec.split('>');
+      if (multi && !isRecordShaped(f, kind)) suspect = true;
       const uid = f[uidIdx];
       if (looksLikeUid(uid)) {
         const name = unescapeHtml(f[nameIdx]);
@@ -137,10 +157,34 @@
 
     if (out.blocked.length) {
       out.changed = true;
-      // 整帧丢弃：房间/私聊帧里只剩空记录时也别发给客户端
-      out.data = kept.some(r => r.length) ? (head + kept.join('<')) : null;
+      if (suspect) {
+        out.abnormal = true;
+        out.data = null;                          // 切分不可信：整帧丢弃，不回拼半截
+      } else {
+        // 整帧丢弃：房间/私聊帧里只剩空记录时也别发给客户端
+        out.data = kept.some(r => r.length) ? (head + kept.join('<')) : null;
+      }
+    } else if (suspect) {
+      out.abnormal = true;
+      const tok = store.enabled ? findBlockedToken(body, store) : null;
+      if (tok) {                                  // 没按下标命中，但帧里确实出现了被拉黑者的 uid
+        out.changed = true;
+        out.data = null;
+        out.blocked.push({ uid: tok, name: '', kind: kind });
+        if (hooks && hooks.onBlock) hooks.onBlock(tok, kind);
+      }
     }
     return out;
+  }
+
+  // 令牌级复查：把帧内容按 '<' '>' 全切开逐个比对黑名单（只在切分可疑时用）
+  function findBlockedToken(body, store) {
+    const tokens = String(body).split(/[<>]/);
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      if (looksLikeUid(t) && isBlockedIn(store, t)) return t;
+    }
+    return null;
   }
 
   // 面板里按名字找 uid：优先最近出现、完全匹配的
@@ -163,20 +207,55 @@
   // 运行时一律用这个单参包装，避免把 isBlockedIn(store, uid) 写成单参调用（踩过：静默失效）
   function isBlocked(uid) { return isBlockedIn(store, uid); }
 
-  function loadStore() {
+  // 内部异常的可见通道：计数 + 首次无条件告警。静默降级最难排查，宁可刷一条 warn
+  let saveFailed = false;
+  const noteError = (function () {
+    let warned = false;
+    return function (where, e) {
+      try { store.counters.err = (store.counters.err || 0) + 1; } catch (_) { }
+      if (!warned) {
+        warned = true;
+        try { console.warn(TAG, '内部异常（首次，后续只计数）：' + where, (e && e.message) || e); } catch (_) { }
+      }
+      if (ui && ui.refreshStats) { try { ui.refreshStats(); } catch (_) { } }
+    };
+  })();
+
+  function writeStore() {
     try {
-      store = normalizeStore(JSON.parse(localStorage.getItem(STORE_KEY) || 'null'));
+      localStorage.setItem(STORE_KEY, JSON.stringify(store));
+      saveFailed = false;
     } catch (e) {
-      store = defaultStore();
+      saveFailed = true;             // 配额/隐私模式/存储分区：不落盘，但要让用户看得见
+      noteError('名单落盘失败（本次会话内仍生效）', e);
     }
+  }
+
+  function flushSave() {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    writeStore();
+  }
+
+  function loadStore() {
+    let rawText = null;
+    try { rawText = localStorage.getItem(STORE_KEY); } catch (e) { noteError('读取 localStorage', e); }
+    let raw = null;
+    try {
+      raw = JSON.parse(rawText || 'null');
+    } catch (e) {
+      // 原值先备份再回落默认值，避免"解析失败→空名单→下次保存覆盖原始数据"的不可恢复
+      try { if (rawText) { localStorage.setItem(STORE_KEY + '_corrupt', rawText); console.warn(TAG, '名单解析失败，原值已备份到 ' + STORE_KEY + '_corrupt'); } } catch (_) { }
+      raw = null;
+    }
+    if (raw && typeof raw === 'object' && raw.v !== 1) {
+      try { console.warn(TAG, '名单版本不是 1（读到 ' + raw.v + '），按当前结构尽力读取'); } catch (_) { }
+    }
+    store = normalizeStore(raw);
   }
 
   function saveStore() {
     if (saveTimer) return;
-    saveTimer = setTimeout(() => {
-      saveTimer = null;
-      try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (e) { }
-    }, 200);
+    saveTimer = setTimeout(() => { saveTimer = null; writeStore(); }, 200);
   }
 
   function log() {
@@ -186,6 +265,10 @@
 
   function myUid() {
     try { return window.uid || null; } catch (e) { return null; }
+  }
+
+  function addCounter(key, n) {
+    store.counters[key] = (store.counters[key] || 0) + (n || 1);
   }
 
   /* ==========================================================================
@@ -214,34 +297,50 @@
     onBlock: blockTick,
   };
 
-  let hooked = false;
+  // 实时判定是否仍挂载：socket 被站点重建/重新赋值后 _onmessage 会换新，标记随之消失
+  function isHooked() {
+    try {
+      const s = window.socket;
+      return !!(s && typeof s._onmessage === 'function' && s._onmessage.__blWrapped === true);
+    } catch (e) { return false; }
+  }
+
+  let warnedAbnormal = false;
 
   function tryHookSocket() {
     const sock = window.socket;
     if (!sock || typeof sock._onmessage !== 'function') return false;
-    if (sock.__blWrapped) { hooked = true; return true; }
+    if (sock._onmessage.__blWrapped === true) return true;     // 已经是我们这层
 
     const orig = sock._onmessage;
-    sock._onmessage = function () {
+    const wrapped = function () {
       const args = arguments;
       try {
         if (typeof args[0] === 'string' && args[0].length) {
           const p = args[0].charAt(0);
           rawStats[p] = (rawStats[p] || 0) + 1;
           const r = filterFrame(args[0], store, hookCbs);
+          if (r.abnormal) {
+            addCounter('abnormal');
+            if (!warnedAbnormal) {
+              warnedAbnormal = true;
+              try { console.warn(TAG, '帧切分可疑（字段里出现分隔符），已按整帧丢弃以防畸形帧进入客户端'); } catch (_) { }
+            }
+          }
           if (r.changed) {
             if (r.data === null) return;                    // 整帧丢弃
             args[0] = r.data;
           }
         }
       } catch (e) {
-        log('过滤异常（已放行）', e && e.message);
+        noteError('收包过滤异常（该帧已放行）', e);
       }
       return orig.apply(this, args);
     };
-    sock.__blWrapped = true;
-    hooked = true;
+    wrapped.__blWrapped = true;
+    sock._onmessage = wrapped;
     log('已挂载收包过滤');
+    if (ui && ui.refreshStats) ui.refreshStats();
     return true;
   }
 
@@ -250,8 +349,18 @@
     let n = 0;
     const t = setInterval(() => {
       n++;
-      if (tryHookSocket() || n > 600) { clearInterval(t); if (n > 600) log('未找到 window.socket，收包过滤未挂载'); }
+      if (tryHookSocket()) { clearInterval(t); return; }
+      if (n === 20) {    // 10 秒还没挂上：无条件提示一次（默认不开调试也要看得见）
+        try { console.warn(TAG, '还没找到 window.socket（未登录？）——收包过滤尚未挂载，面板会持续显示未挂载'); } catch (_) { }
+        if (ui && ui.refreshStats) ui.refreshStats();
+      }
+      if (n > 600) { clearInterval(t); try { console.warn(TAG, '300 秒仍未挂上收包过滤，已放弃自动重试（面板每 5 秒仍会自检重挂）'); } catch (_) { } }
     }, 500);
+  }
+
+  // 自检重挂：站点重连/重建 socket 后，5 秒内自动把过滤装回新 socket
+  function rehookCheck() {
+    if (!isHooked()) { if (tryHookSocket()) log('检测到收包过滤丢失，已重新挂载'); }
   }
 
   /* ==========================================================================
@@ -280,35 +389,48 @@
 
   // 找到"该删哪一行"：正常消息是 .msg；系统消息（pubMsgSystem 等）没有 .msg 祖先，
   // 就向上找 msgholderBox 的直接子节点，整行删掉而不是只删头像。
+  // 上行深度封顶 3 层：站点若在消息与容器之间插了"分组/日期"包裹层，继续上行会误删整组别人的消息（违反"零影响"）。
   function rowFor(node) {
     if (node.classList && node.classList.contains('msg')) return node;
     const m = node.closest ? node.closest('.msg') : null;
     if (m) return m;
     let cur = node;
-    while (cur && cur.parentNode && !(cur.parentNode.classList && cur.parentNode.classList.contains('msgholderBox'))) cur = cur.parentNode;
-    return (cur && cur !== document.documentElement && cur !== document.body) ? cur : node;
+    for (let up = 0; up < 3; up++) {
+      const p = cur.parentNode;
+      if (!p || p === document.documentElement || p === document.body) break;
+      if (p.classList && p.classList.contains('msgholderBox')) return cur;
+      cur = p;
+    }
+    return node;
   }
 
   function hideSessionNodes(scope) {
     let list;
-    try { list = (scope || document).querySelectorAll('[ip]'); } catch (e) { return; }
+    try { list = (scope || document).querySelectorAll('[ip]'); } catch (e) { noteError('会话项查询', e); return; }
     Array.prototype.forEach.call(list, (n) => {
       const uid = n.getAttribute('ip');
       if (!looksLikeUid(uid)) return;
       const hide = store.enabled && isBlocked(uid);
       if (hide && !n.hasAttribute('data-bl-hidden')) {
+        n.setAttribute('data-bl-prev-display', n.style.display || '');   // 记住站点自己设的原值，恢复时写回
         n.setAttribute('data-bl-hidden', '1');
         n.style.display = 'none';
-        store.counters.dom++;
+        addCounter('dom');
         saveStore();
       } else if (!hide && n.hasAttribute('data-bl-hidden')) {   // 解除拉黑后恢复
+        n.style.display = n.getAttribute('data-bl-prev-display') || '';
+        n.removeAttribute('data-bl-prev-display');
         n.removeAttribute('data-bl-hidden');
-        n.style.display = '';
       }
     });
   }
 
+  // 排障用：只留最近 20 条，避免长挂机时无限累积（生产路径每 5 秒都会 push）
   let lastSweepDiag = [];
+  function pushSweepDiag(d) {
+    lastSweepDiag.push(d);
+    if (lastSweepDiag.length > 20) lastSweepDiag.shift();
+  }
 
   function sweepNode(root) {
     if (!root || root.nodeType !== 1) return 0;
@@ -327,10 +449,10 @@
       const hit = !!(uid && store.enabled && isBlocked(uid));
       diag.hits.push({ uid: uid, blocked: hit, hasParent: !!row.parentNode, sameAsRoot: row === root });
       if (hit) {
-        if (row.parentNode) { row.parentNode.removeChild(row); removed++; store.counters.dom++; }
+        if (row.parentNode) { row.parentNode.removeChild(row); removed++; addCounter('dom'); }
       }
     });
-    lastSweepDiag.push(diag);
+    pushSweepDiag(diag);
     if (removed) { saveStore(); if (ui && ui.refreshStats) ui.refreshStats(); }
     return removed;
   }
@@ -343,13 +465,13 @@
         const kids = Array.prototype.slice.call(boxes[b].children);   // 先快照：删节点时 HTMLCollection 会位移
         kids.forEach((n) => { removed += sweepNode(n); });
       }
-    } catch (e) { log('消息清扫异常', e && e.message); }
+    } catch (e) { noteError('消息清扫', e); }
     return removed;
   }
 
   function sweepAll() {
     const removed = sweepMessages();
-    try { hideSessionNodes(); } catch (e) { log('会话项清扫异常', e && e.message); }
+    try { hideSessionNodes(); } catch (e) { noteError('会话项清扫', e); }
     if (removed) log('清扫历史消息', removed, '条');
     return removed;
   }
@@ -360,7 +482,7 @@
     if (sessTimer) return;
     sessTimer = setTimeout(() => {
       sessTimer = null;
-      try { hideSessionNodes(scope); } catch (e) { }
+      try { hideSessionNodes(scope); } catch (e) { noteError('会话项清扫（节流）', e); }
     }, 500);
   }
 
@@ -390,9 +512,12 @@
       });
       obs.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['ip', 'data-uid'] });
       sweepAll();
-      // 兜底：每 5 秒整体扫一次（只遍历可见消息，开销小），防漏网
-      setInterval(() => { try { sweepAll(); } catch (e) { } }, 5000);
-    } catch (e) { log('DOM 守卫启动失败', e && e.message); }
+      // 兜底：每 5 秒整体扫一次 + 自检收包过滤是否还在（站点重连/重建 socket 会丢掉包装）
+      setInterval(() => {
+        try { sweepAll(); } catch (e) { noteError('定时清扫', e); }
+        try { rehookCheck(); } catch (e) { noteError('重挂自检', e); }
+      }, 5000);
+    } catch (e) { noteError('DOM 守卫启动', e); }
   }
 
   /* ==========================================================================
@@ -474,6 +599,17 @@
     swRow.appendChild(dbgWrap);
     panel.appendChild(swRow);
 
+    // 右键菜单开关（conf.rightClick 之前只读、没法改）
+    const rcRow = el('div', { padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #2a2b33' });
+    const rc = el('input'); rc.type = 'checkbox'; rc.checked = store.conf.rightClick !== false;
+    rc.onchange = () => {
+      store.conf.rightClick = rc.checked; saveStore();
+      setStatus(rc.checked ? '右键房间消息头像可拉黑' : '右键菜单已关闭（面板里仍可拉黑）', '#999');
+    };
+    rcRow.appendChild(rc);
+    rcRow.appendChild(el('span', null, '右键头像弹拉黑菜单'));
+    panel.appendChild(rcRow);
+
     // 添加
     const addRow = el('div', { display: 'flex', gap: '6px', padding: '10px 12px 6px' });
     const input = el('input', {
@@ -507,6 +643,8 @@
     // 统计 + 底部按钮
     const stats = el('div', { padding: '8px 12px', color: '#7f8794', borderTop: '1px solid #2a2b33' }, '已屏蔽：房间 0 · 私聊 0 · 弹幕 0 · 历史 0');
     panel.appendChild(stats);
+    const warn = el('div', { padding: '0 12px 6px', color: '#d0a04a', fontSize: '11px', display: 'none' });
+    panel.appendChild(warn);
     const foot = el('div', { display: 'flex', gap: '6px', padding: '0 12px 10px' });
     const copyBtn = el('button', {
       background: '#2a2b33', color: '#bbb', border: '1px solid #444', borderRadius: '5px',
@@ -514,19 +652,31 @@
     }, '复制名单');
     copyBtn.onclick = () => {
       const lines = Object.keys(store.uids).map(u => u + '\t' + (store.uids[u].name || ''));
-      const text = lines.join('\n') || '(名单为空)';
-      try {
-        if (navigator.clipboard) navigator.clipboard.writeText(text);
-        else { input.value = text; input.select(); document.execCommand('copy'); }
-        setStatus('已复制 ' + lines.length + ' 条到剪贴板', '#68b26d');
-      } catch (e) { setStatus('复制失败，见控制台', '#ec4141'); log(text); }
+      if (!lines.length) { setStatus('名单为空，没什么可复制', '#d0a04a'); return; }
+      const text = lines.join('\n');
+      const okMsg = () => setStatus('已复制 ' + lines.length + ' 条到剪贴板', '#68b26d');
+      const fallback = () => {
+        // 用临时 textarea，别覆盖用户正在输入的搜索框
+        const ta = el('textarea', { position: 'fixed', top: '0', left: '0', opacity: '0' });
+        ta.value = text;
+        document.body.appendChild(ta);
+        let ok = false;
+        try { ta.select(); ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        if (ta.parentNode) ta.parentNode.removeChild(ta);
+        if (ok) okMsg();
+        else { log(text); setStatus('复制失败（浏览器不给权限）：名单已打到控制台，可手动复制', '#ec4141'); }
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        // Promise 的拒绝 try/catch 抓不到，必须显式接失败分支
+        navigator.clipboard.writeText(text).then(okMsg, fallback);
+      } else fallback();
     };
     const resetBtn = el('button', {
       background: '#2a2b33', color: '#bbb', border: '1px solid #444', borderRadius: '5px',
       padding: '5px 10px', cursor: 'pointer', fontSize: '11px',
     }, '清空统计');
     resetBtn.onclick = () => {
-      store.counters = { room: 0, priv: 0, danmaku: 0, dom: 0 }; saveStore(); refreshAll();
+      store.counters = { room: 0, priv: 0, danmaku: 0, dom: 0, abnormal: 0, err: 0 }; saveStore(); refreshAll();
       setStatus('统计已清零', '#68b26d');
     };
     foot.appendChild(copyBtn); foot.appendChild(resetBtn);
@@ -574,10 +724,20 @@
 
     function refreshStats() {
       const c = store.counters;
-      stats.textContent = '已屏蔽：房间 ' + c.room + ' · 私聊 ' + c.priv + ' · 弹幕 ' + c.danmaku + ' · 历史 ' + c.dom;
+      let t = '已屏蔽：房间 ' + c.room + ' · 私聊 ' + c.priv + ' · 弹幕 ' + c.danmaku + ' · 历史 ' + c.dom;
+      if (c.abnormal) t += ' · 可疑帧 ' + c.abnormal;
+      if (c.err) t += ' · 异常 ' + c.err;
+      stats.textContent = t;
+      // 真机上"看不到效果"的头号原因就是没挂上或落盘失败，这里必须显式显示
+      const msgs = [];
+      if (!isHooked()) msgs.push('⚠ 收包过滤未挂载（未登录？）——新消息不会被拦，只有历史清扫生效');
+      if (saveFailed) msgs.push('⚠ 名单落盘失败（本次会话内仍生效）');
+      if (c.err) msgs.push('存在内部异常 ' + c.err + ' 次（详见控制台）');
+      if (msgs.length) { warn.textContent = msgs.join('；'); warn.style.display = 'block'; }
+      else warn.style.display = 'none';
     }
 
-    function refreshAll() { refreshBlacklist(); refreshSeen(); refreshStats(); chk.checked = store.enabled; }
+    function refreshAll() { refreshBlacklist(); refreshSeen(); refreshStats(); chk.checked = store.enabled; rc.checked = store.conf.rightClick !== false; }
 
     addBtn.onclick = () => {
       const v = input.value.trim();
@@ -616,7 +776,7 @@
     log('拉黑', uid, name || '');
     statusMsg('已拉黑 ' + (name || uid), '#68b26d');
     if (ui) { ui.refreshAll(); }
-    sweepAll();
+    try { sweepAll(); } catch (e) { noteError('拉黑后的历史清扫', e); }
   }
 
   function unblock(uid) {
@@ -626,7 +786,7 @@
     log('解除拉黑', uid);
     statusMsg('已解除 ' + uid + '（旧消息已删，不会恢复；之后的消息可见）', '#68b26d');
     if (ui) { ui.refreshAll(); }
-    hideSessionNodes();   // 恢复被隐藏的私聊会话项
+    try { hideSessionNodes(); } catch (e) { noteError('恢复会话项', e); }   // 恢复被隐藏的私聊会话项
   }
 
   function statusMsg(t, c) { if (ui) ui.setStatus(t, c); else log(t); }
@@ -674,35 +834,49 @@
    * 启动
    * ========================================================================== */
   function init() {
+    // 幂等：同一页面被注入两次时，第二份会因"看起来已挂载"而半失效（面板用第二份的名单，过滤用第一份的 store）。
+    // 注意必须用独立的已初始化标记，不能用 window.__IIROSE_BLACKLIST__——它在本脚本求值时（init 之前）就已挂上，
+    // 拿它当守卫会导致第一次加载就 return（踩过）。
+    if (window.__IIROSE_BLACKLIST_INITED__) {
+      try { console.warn(TAG, '本页面已加载过拉黑插件，跳过重复注入（版本 ' + VERSION + '）'); } catch (_) { }
+      return;
+    }
+    window.__IIROSE_BLACKLIST_INITED__ = true;
     loadStore();
     waitSocket();
     startDomGuard();
     startContextMenu();
     buildUi();
+    // 卸载窗口兜底：拉黑后 200ms 内刷新/切房，节流中的那次改动否则会丢
+    try { window.addEventListener('pagehide', flushSave); window.addEventListener('beforeunload', flushSave); } catch (_) { }
     console.log('%c[iirose 拉黑] v' + VERSION + ' 已加载' + (store.enabled ? '' : '（当前为关闭状态）'),
       'color:#ff6b6b;font-weight:bold');
   }
 
-  try {
+  // 注册排障 API：已存在就不覆盖（否则重复注入时，第二份的空 store 会顶掉第一份的 API，排障结论全错）
+  if (!window.__IIROSE_BLACKLIST__) try {
     window.__IIROSE_BLACKLIST__ = {
       version: VERSION,
       get store() { return store; },
-      get hooked() { return hooked; },
+      get hooked() { return isHooked(); },          // 实时判定，不是一次性闩锁
+      flush: flushSave,
       block: block,
       unblock: unblock,
       isBlocked: isBlocked,
       sweep: sweepAll,
       // 真机排障：逐行报告 DOM 清扫的判断结果，用来定位"为什么这条没删掉"
       debugSweep: function () {
-        const box = document.getElementsByClassName('msgholderBox')[0];
-        const rows = [];
-        if (box) {
-          Array.prototype.forEach.call(box.children, (n) => {
+        const boxes = document.getElementsByClassName('msgholderBox');
+        const out = [];
+        for (let b = 0; b < boxes.length; b++) {
+          const rows = [];
+          Array.prototype.forEach.call(boxes[b].children, (n) => {
             const uid = uidOfMessageNode(n);
             rows.push({ cls: String(n.className), id: (n.dataset && n.dataset.id) || '', uid: uid, blocked: !!(uid && isBlocked(uid)) });
           });
+          out.push({ boxIndex: b, childCount: boxes[b].children.length, rows: rows });
         }
-        return { enabled: store.enabled, boxFound: !!box, childCount: box ? box.children.length : -1, rows: rows, blacklist: Object.keys(store.uids) };
+        return { enabled: store.enabled, boxCount: boxes.length, boxes: out, blacklist: Object.keys(store.uids) };
       },
       rawStats: () => JSON.parse(JSON.stringify(rawStats)),
       // 内部函数直通（真机排障用，便于逐行验证判断链）
@@ -726,7 +900,7 @@
           return out;
         };
         return {
-          version: VERSION, hooked: hooked, myUid: myUid(),
+          version: VERSION, hooked: isHooked(), myUid: myUid(),
           msgholderBox: !!document.getElementsByClassName('msgholderBox')[0],
           msgs: pick('.msgholderBox > *', 6),
           ipNodes: pick('[ip]', 6),

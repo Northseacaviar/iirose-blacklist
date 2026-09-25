@@ -8,7 +8,7 @@ const SRC = path.join(__dirname, '..', 'src', 'iirose-blacklist.js');
 const F = require('./frames.js');
 
 const EXPORTS = ['defaultStore', 'normalizeStore', 'isBlockedIn', 'hasUid', 'unescapeHtml',
-  'recordSeen', 'looksLikeUid', 'filterFrame', 'findUidByName', 'MAX_SEEN'];
+  'recordSeen', 'looksLikeUid', 'filterFrame', 'findUidByName', 'isRecordShaped', 'findBlockedToken', 'MAX_SEEN'];
 
 function loadCore() {
   const src = fs.readFileSync(SRC, 'utf8');
@@ -171,6 +171,69 @@ t('findUidByName 忽略大小写、取最近出现的', () => {
   eq(r.hits.length, 2);
   eq(L.findUidByName(s, 'nobody').uid, null);
   eq(L.findUidByName(s, '').uid, null);
+});
+
+console.log('\n== 审查报告回归（分隔符错位 / 原型污染）==');
+t('B1-1 房间内容含 < ：不能静默漏过，也不能回拼残片（整帧丢）', () => {
+  const frame = '"' + F.roomRec(F.ROOM_UID, '甲', '5<3 is true', '1700000001');
+  const r = L.filterFrame(frame, storeWith([F.ROOM_UID]), null);
+  eq(r.changed, true, 'changed');
+  eq(r.data, null, 'data 应为 null（整帧丢弃）');
+  eq(r.abnormal, true, 'abnormal');
+});
+t('B1-2 私聊内容含 < ：禁止把半截记录交给站点', () => {
+  const frame = '""' + F.privRec(F.PRIV_UID, '乙', 'a<b', '1700000101');
+  const r = L.filterFrame(frame, storeWith([F.PRIV_UID]), null);
+  eq(r.data, null);
+  eq(r.abnormal, true);
+});
+t('B1-3 头衔含 < ：整帧丢弃，绝不回拼畸形帧', () => {
+  const rec = F.roomRec(F.ROOM_UID, '甲', 'hi', '1700000001').replace("g'91'2325", "g'<9>'2325");
+  const frame = '"' + rec + '<' + F.roomRec(F.OTHER_UID, '乙', 'yo', '1700000002');
+  const r = L.filterFrame(frame, storeWith([F.ROOM_UID]), null);
+  eq(r.data, null);
+  eq(r.abnormal, true);
+});
+t('B1-4 名字含 > 使 uid 下标错位：令牌级兜底仍能拦下', () => {
+  const frame = '"' + F.roomRec(F.ROOM_UID, 'a>b', 'hi', '1700000001');
+  const r = L.filterFrame(frame, storeWith([F.ROOM_UID]), null);
+  eq(r.changed, true);
+  eq(r.data, null);
+  eq(r.abnormal, true);
+});
+t('健康帧不得被误判为可疑（abnormal 必须为假）', () => {
+  [[F.docRoom, []], [F.docPrivate, []], [F.room3, []], [F.priv2, []], [F.docDanmaku, []]].forEach(([f, b]) => {
+    const r = L.filterFrame(f, storeWith(b), null);
+    eq(r.abnormal, false, '误判：' + f.slice(0, 40));
+  });
+});
+t('S2 uid 为 __proto__ 时仍要真的成为 own 键', () => {
+  const s = L.defaultStore();
+  s.uids['__proto__'] = { name: 'x', ts: 1 };
+  eq(Object.keys(s.uids).length, 1);
+  eq(L.isBlockedIn(s, '__proto__'), true);
+  L.recordSeen(s, '__proto__', 'evil');
+  eq(Object.keys(s.seen).length, 1);
+  const frame = '"' + F.roomRec('__proto__', 'x', 'hi', '1700000001');
+  eq(L.filterFrame(frame, s, null).data, null, '拉黑 __proto__ 应生效');
+});
+t('normalizeStore 处理含 __proto__ 键的落盘数据', () => {
+  const s = L.normalizeStore(JSON.parse('{"v":1,"uids":{"__proto__":{"name":"n","ts":7}}}'));
+  eq(Object.keys(s.uids).length, 1);
+  eq(s.uids['__proto__'].name, 'n');
+});
+t('令牌级兜底不误伤：可疑帧里出现的是"别人的 uid"→ 原样透传', () => {
+  const frame = '"' + F.roomRec(F.OTHER_UID, 'a>b', 'hi', '1700000001');
+  const r = L.filterFrame(frame, storeWith([F.ROOM_UID]), null);
+  eq(r.changed, false, 'changed 应为 false');
+  eq(r.data, frame, '应原样透传');
+  eq(r.abnormal, true, '但应记一笔可疑');
+});
+t('shape 校验：残片必被识破（消息id 非数字 / uid 位不是 uid）', () => {
+  eq(L.isRecordShaped(['b', '339f88', '', '339f88', '3'], 'priv'), false);
+  eq(L.isRecordShaped(['3 is true', '040b02', '040b02'], 'room'), false);
+  eq(L.isRecordShaped(['1706776691', '5b0fe8a3b1ff2', 'x'], 'priv'), true);
+  eq(L.isRecordShaped(['1706775936', 'http://av', 'n', '', '', '', '1', '', '6533df3d933bf'], 'room'), true);
 });
 
 console.log('\n== 结果 ==');
