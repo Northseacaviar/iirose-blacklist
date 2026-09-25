@@ -165,6 +165,17 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 - **下行帧是否已转义分隔符**：面板勾「调试日志」后观察「可疑帧」计数是否增长；配合 `rawStats()` 看帧前缀分布。
 - **与 iiroseForge 共存（A8）**：装 forge 后确认 `__IIROSE_BLACKLIST__.hooked === true`、`rawStats()` 持续增长、切房/重连后仍过滤。
 
+## 成本（vibecoding 的花费记录）
+
+本项目的 token 与花费由脚本直查本机 Hermes 会话库生成（只读），明细在 [`docs/成本账.md`](docs/成本账.md)。
+
+<!-- COST:BEGIN 由 tools/token-report.py --readme 生成，别手改 -->
+- 截至 2026-09-25 20:31（北京时间）：估算花费 **$0.7415**（≈5 元人民币）· 消息 408 · 工具调用 203
+- 结构：主开发会话 $0.61 ／ 子 agent 独立审查 $0.09 ／ 部分相关折算 $0.04（明细见 [`docs/成本账.md`](docs/成本账.md)）
+- 口径：`estimated_cost_usd` 是**估算不是账单**；`reasoning_tokens` 通常已含在输出口径里；缓存读占 ~98%，所以「总 token 近亿」不等于贵。
+- 复现：`python tools/token-report.py`（屏幕）· `--doc docs/成本账.md`（重写成本账）· `--readme README.md`（刷新本段）
+<!-- COST:END -->
+
 ## 版本
 
 - loader v1.1（2026-09-25，独立于插件版本）：新增 `loader.js` 注入入口 —— 相对自身目录取主脚本、jsdelivr 上显式取 `@main`（避开「无 ref 地址 = 最新 tag 快照」这个坑）、`?t=时间戳` 绕开 7 天缓存、失败自动换 fastly/gcore 域名、重复注入不重复拉、loader 地址自带版本则以版本为准。配套 `tests/loader-test.html`（本地 6 项）与 `tests/loader-cdn.html`（CDN 实链，含「主脚本确实走 @main」）。**用 loader 的用户以后不需要任何更新动作**。
