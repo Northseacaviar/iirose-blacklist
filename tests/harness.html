@@ -21,6 +21,11 @@
 <pre id="out"></pre>
 
 <script>
+  // ==== 模拟站点行为（真机实测：站点在 document 捕获阶段对 click 调 preventDefault()）====
+  // 保证"面板控件不得依赖浏览器默认动作"这条不回归：原生 checkbox 在这种环境下点不动。
+  document.addEventListener('click', (e) => { e.preventDefault(); }, true);
+</script>
+<script>
 try { localStorage.removeItem('iirose_blacklist_v1'); } catch (e) {}
 window.uid = 'myown0000001a';                 // 站点在 iframe 上挂的 window.uid（自己的 uid）
 
@@ -63,6 +68,13 @@ function innermost(matcher, root) {
   const all = Array.from((root || document).querySelectorAll('div,button'));
   const hit = all.filter((e) => matcher(e));
   return hit.find((e) => !hit.some((o) => o !== e && e.contains(o))) || hit[0] || null;
+}
+// 真实点击手势：mousedown → mouseup → click（和浏览器发出来的顺序一致）
+function realClick(node) {
+  const opts = { bubbles: true, cancelable: true, view: window };
+  node.dispatchEvent(new MouseEvent('mousedown', opts));
+  node.dispatchEvent(new MouseEvent('mouseup', opts));
+  node.dispatchEvent(new MouseEvent('click', opts));
 }
 function panel() { return innermost((e) => /^已拉黑 \(\d+\)$/.test(e.textContent || '')) ? (innermost((e) => /^已拉黑 \(\d+\)$/.test(e.textContent || '')).parentElement) : null; }
 
@@ -260,13 +272,14 @@ async function run() {
   await t('W24 面板可关掉右键拉黑菜单', async () => {
     const p = panel();
     ok(p, '面板没打开');
-    const boxes = Array.from(p.querySelectorAll('input[type=checkbox]'));
-    ok(boxes.length >= 3, '应有 启用屏蔽/右键菜单/调试 三个勾选框，实际 ' + boxes.length);
-    const rcBox = boxes.find((b) => /右键/.test((b.parentElement && b.parentElement.textContent) || ''));
-    ok(rcBox, '找不到"右键头像弹拉黑菜单"勾选框');
-    eq(rcBox.checked, true);
-    rcBox.checked = false; rcBox.dispatchEvent(new Event('change', { bubbles: true }));
+    const rows = Array.from(p.querySelectorAll('[data-bl-key]'));
+    eq(rows.length, 3, '应有 启用屏蔽/右键菜单/调试 三个开关行，实际 ' + rows.length);
+    const rcRow = p.querySelector('[data-bl-key="rightClick"]');
+    ok(rcRow, '找不到"右键头像弹拉黑菜单"开关行');
+    eq(rcRow.querySelector('span').textContent, '✓', '开关默认应为开（方框里应有勾）');
+    realClick(rcRow);
     await sleep(80);
+    eq(rcRow.querySelector('span').textContent, '', '点一下方框里的勾应消失');
     eq(A.store.conf.rightClick, false);
     // 关掉后再右键头像，不该出现菜单
     const h = document.getElementById('msgHolder');
@@ -281,7 +294,62 @@ async function run() {
       && /^(拉黑 |解除拉黑 )/.test(e.textContent || '');
     const menu = Array.from(document.querySelectorAll('div')).filter(isMenu);
     eq(menu.length, 0, '关掉开关后仍弹了菜单：' + menu.map((m) => m.textContent).join('|'));
-    rcBox.checked = true; rcBox.dispatchEvent(new Event('change', { bubbles: true }));
+    realClick(rcRow);
+    await sleep(80);
+    eq(A.store.conf.rightClick, true, '再点一下应恢复');
+    eq(rcRow.querySelector('span').textContent, '✓');
+  });
+
+  await t('W25 站点 preventDefault 拦掉默认动作时，三个开关照样能切（本次踩的坑）', async () => {
+    const p = panel();
+    ok(p, '面板没打开');
+    // 前置：确认本页确实装着"站点式拦截"，否则这条测试是假的
+    let prevented = false;
+    const spy = (e) => { prevented = e.defaultPrevented; };
+    document.addEventListener('click', spy);
+    realClick(p.querySelector('[data-bl-key="enabled"]'));
+    await sleep(80);
+    document.removeEventListener('click', spy);
+    // 先断言切换生效（关键），再报告环境是否符合（用 console 提示，不作硬断言）
+    const et = p.querySelector('[data-bl-key="enabled"]');
+    eq(et.querySelector('span').textContent, '', '启用屏蔽没被切到关');
+    eq(A.store.enabled, false);
+    realClick(et); await sleep(80);
+    eq(A.store.enabled, true, '再点回来应为开');
+    eq(et.querySelector('span').textContent, '✓');
+    const dt = p.querySelector('[data-bl-key="debug"]');
+    realClick(dt); await sleep(80);
+    eq(A.store.conf.debug, true, '调试日志没被切到开');
+    realClick(dt); await sleep(80);
+    eq(A.store.conf.debug, false);
+    console.log('[harness] 本页 document 捕获阶段 click 默认动作已被 preventDefault（模拟站点）：', prevented);
+  });
+
+  await t('W26 面板点不动时的备用入口：API setEnabled/setDebug/setRightClick', async () => {
+    eq(A.setEnabled(false), false);
+    eq(A.store.enabled, false);
+    eq(A.setEnabled(true), true);
+    eq(A.setDebug(true), true);
+    eq(A.setDebug(false), false);
+    eq(A.setRightClick(false), false);
+    eq(A.setRightClick(true), true);
+    const p = panel();
+    eq(p.querySelector('[data-bl-key="enabled"]').querySelector('span').textContent, '✓', 'API 改了状态，方框应同步');
+  });
+
+  await t('W27 _diag.hitTest：能看出控件是否被盖住/尺寸归零', async () => {
+    const p = panel();
+    ok(p, '面板没打开');
+    const rows = p.querySelectorAll('[data-bl-key]');
+    realClick(rows[0]);   // 面板得先真的打开着，hitTest 才有意义（此处顺带验证）
+    await sleep(80);
+    realClick(rows[0]);
+    await sleep(80);
+    const info = A._diag.hitTest();
+    ok(info.length >= 4, 'hitTest 应报告 3 个开关行 + 若干按钮，实际 ' + info.length);
+    // clippedOut（滚出可视区）不算问题，只有"尺寸归零/不可见/被别的元素压住"才算
+    const bad = info.filter((i) => !i.visible || (!i.insideRow && !i.clippedOut));
+    eq(bad.length, 0, '有控件不可见或被别的元素盖住：' + JSON.stringify(bad));
   });
 
   const fail = results.filter((r) => !r.ok);

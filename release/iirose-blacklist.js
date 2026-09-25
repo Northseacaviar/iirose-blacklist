@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.2';
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -533,6 +533,57 @@
     return n;
   }
 
+  // 同 el()，但内联样式带 !important（内联 !important 优先级最高），站点样式表盖不掉
+  function imp(tag, style, text) {
+    const n = document.createElement(tag);
+    if (style) for (const k in style) n.style.setProperty(k.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase()), style[k], 'important');
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+
+  // 统一的"按下即触发"绑定。为什么不直接用 onclick：
+  // 站点在 document 捕获阶段对 click 调 preventDefault()（真机实测：拖动、右键、onclick 都正常，
+  // 唯独原生复选框的默认动作被取消 → 有方框但点不动）。默认动作被取消挡不住处理器触发，所以处理器照用；
+  // 但为了将来站点改成 stopPropagation（那时连处理器都不触发）也不失效，同时挂 mouseup 这条路：
+  // 按下并在同一元素上抬起就触发，用"本次手势"标志位保证 mouseup 与配对 click 不会翻两次。
+  function onPress(node, fn) {
+    let pressed = false, firedByGesture = false;
+    node.addEventListener('mousedown', () => { pressed = true; firedByGesture = false; });
+    node.addEventListener('mouseup', () => { if (pressed) { fn(); firedByGesture = true; } pressed = false; });
+    node.addEventListener('click', () => { if (firedByGesture) { firedByGesture = false; return; } fn(); });
+    document.addEventListener('mouseup', () => { pressed = false; });   // 冒泡阶段，晚于元素自身
+    return node;
+  }
+
+  // 自绘开关：不依赖原生控件的渲染与默认动作，整行可点（方框+文字都算），键盘也能切
+  function toggleRow(key, text, initial, onChange, right) {
+    const row = imp('div', {
+      display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', padding: '5px 12px',
+      color: '#bbb', userSelect: 'none', marginLeft: right ? 'auto' : '0',
+    });
+    row.dataset.blKey = key;
+    row.tabIndex = 0;
+    const box = imp('span', {
+      width: '13px', height: '13px', minWidth: '13px', borderRadius: '3px', border: '1px solid #666',
+      background: '#2a2b33', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: '10px', lineHeight: '1', color: '#fff', boxSizing: 'border-box',
+    });
+    const label = imp('span', null, text);
+    let on = !!initial;
+    function paint() {
+      box.textContent = on ? '✓' : '';
+      box.style.setProperty('background', on ? '#b3261e' : '#2a2b33', 'important');
+      box.style.setProperty('border-color', on ? '#b3261e' : '#666', 'important');
+      label.style.setProperty('color', on ? '#eee' : '#888', 'important');
+    }
+    paint();
+    onPress(row, () => { on = !on; paint(); onChange(on); });
+    row.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); on = !on; paint(); onChange(on); } });
+    row.appendChild(box); row.appendChild(label);
+    row.__set = (v) => { on = !!v; paint(); };
+    return row;
+  }
+
   function makeDraggable(node, handle, onClick) {
     let sx = 0, sy = 0, ox = 0, oy = 0, moved = 0, dragging = false;
     handle.addEventListener('mousedown', (e) => {
@@ -577,38 +628,31 @@
     });
     title.appendChild(el('span', null, '🚫 拉黑屏蔽 v' + VERSION));
     const closeBtn = el('span', { cursor: 'pointer', color: '#888', fontSize: '16px' }, '×');
-    closeBtn.onclick = () => { panel.style.display = 'none'; };
+    onPress(closeBtn, () => { panel.style.display = 'none'; });
     title.appendChild(closeBtn);
     panel.appendChild(title);
 
-    // 开关
-    const swRow = el('div', { padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid #2a2b33' });
-    const chk = el('input'); chk.type = 'checkbox'; chk.checked = store.enabled;
-    const chkLabel = el('span', null, '启用屏蔽');
-    chk.onchange = () => {
-      store.enabled = chk.checked; saveStore();
-      log('屏蔽开关', store.enabled);
-      setStatus(store.enabled ? '已开启屏蔽' : '已关闭屏蔽（名单保留）', store.enabled ? '#68b26d' : '#d0a04a');
+    // 开关（自绘，不用原生 checkbox —— 站点全局 preventDefault 会把原生控件的默认动作吃掉）
+    const swRow = el('div', { padding: '3px 0', display: 'flex', alignItems: 'center', borderBottom: '1px solid #2a2b33' });
+    const enableToggle = toggleRow('enabled', '启用屏蔽', store.enabled, (on) => {
+      store.enabled = on; saveStore();
+      log('屏蔽开关', on);
+      setStatus(on ? '已开启屏蔽' : '已关闭屏蔽（名单保留）', on ? '#68b26d' : '#d0a04a');
       setTimeout(() => { if (store.enabled) sweepAll(); }, 50);
-    };
-    swRow.appendChild(chk); swRow.appendChild(chkLabel);
-    const dbgWrap = el('label', { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px', color: '#888', cursor: 'pointer' });
-    const dbg = el('input'); dbg.type = 'checkbox'; dbg.checked = !!store.conf.debug;
-    dbg.onchange = () => { store.conf.debug = dbg.checked; saveStore(); log('调试日志', dbg.checked); };
-    dbgWrap.appendChild(dbg); dbgWrap.appendChild(el('span', null, '调试日志'));
-    swRow.appendChild(dbgWrap);
+    });
+    const debugToggle = toggleRow('debug', '调试日志', !!store.conf.debug, (on) => {
+      store.conf.debug = on; saveStore(); log('调试日志', on);
+      setStatus(on ? '调试日志已开（控制台会打统计）' : '调试日志已关', '#999');
+    }, true);
+    swRow.appendChild(enableToggle); swRow.appendChild(debugToggle);
     panel.appendChild(swRow);
 
     // 右键菜单开关（conf.rightClick 之前只读、没法改）
-    const rcRow = el('div', { padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #2a2b33' });
-    const rc = el('input'); rc.type = 'checkbox'; rc.checked = store.conf.rightClick !== false;
-    rc.onchange = () => {
-      store.conf.rightClick = rc.checked; saveStore();
-      setStatus(rc.checked ? '右键房间消息头像可拉黑' : '右键菜单已关闭（面板里仍可拉黑）', '#999');
-    };
-    rcRow.appendChild(rc);
-    rcRow.appendChild(el('span', null, '右键头像弹拉黑菜单'));
-    panel.appendChild(rcRow);
+    const rcToggle = toggleRow('rightClick', '右键头像弹拉黑菜单', store.conf.rightClick !== false, (on) => {
+      store.conf.rightClick = on; saveStore();
+      setStatus(on ? '右键房间消息头像可拉黑' : '右键菜单已关闭（面板里仍可拉黑）', '#999');
+    });
+    panel.appendChild(rcToggle);
 
     // 添加
     const addRow = el('div', { display: 'flex', gap: '6px', padding: '10px 12px 6px' });
@@ -650,7 +694,7 @@
       background: '#2a2b33', color: '#bbb', border: '1px solid #444', borderRadius: '5px',
       padding: '5px 10px', cursor: 'pointer', fontSize: '11px',
     }, '复制名单');
-    copyBtn.onclick = () => {
+    onPress(copyBtn, () => {
       const lines = Object.keys(store.uids).map(u => u + '\t' + (store.uids[u].name || ''));
       if (!lines.length) { setStatus('名单为空，没什么可复制', '#d0a04a'); return; }
       const text = lines.join('\n');
@@ -670,15 +714,15 @@
         // Promise 的拒绝 try/catch 抓不到，必须显式接失败分支
         navigator.clipboard.writeText(text).then(okMsg, fallback);
       } else fallback();
-    };
+    });
     const resetBtn = el('button', {
       background: '#2a2b33', color: '#bbb', border: '1px solid #444', borderRadius: '5px',
       padding: '5px 10px', cursor: 'pointer', fontSize: '11px',
     }, '清空统计');
-    resetBtn.onclick = () => {
+    onPress(resetBtn, () => {
       store.counters = { room: 0, priv: 0, danmaku: 0, dom: 0, abnormal: 0, err: 0 }; saveStore(); refreshAll();
       setStatus('统计已清零', '#68b26d');
-    };
+    });
     foot.appendChild(copyBtn); foot.appendChild(resetBtn);
     panel.appendChild(foot);
 
@@ -691,7 +735,7 @@
         background: 'transparent', color: btnColor, border: '1px solid ' + btnColor, borderRadius: '4px',
         padding: '3px 8px', cursor: 'pointer', fontSize: '11px', flexShrink: '0',
       }, btnText);
-      b.onclick = onClick;
+      onPress(b, onClick);
       r.appendChild(txt); r.appendChild(b);
       return r;
     }
@@ -737,9 +781,14 @@
       else warn.style.display = 'none';
     }
 
-    function refreshAll() { refreshBlacklist(); refreshSeen(); refreshStats(); chk.checked = store.enabled; rc.checked = store.conf.rightClick !== false; }
+    function refreshAll() {
+      refreshBlacklist(); refreshSeen(); refreshStats();
+      enableToggle.__set(store.enabled);
+      debugToggle.__set(!!store.conf.debug);
+      rcToggle.__set(store.conf.rightClick !== false);
+    }
 
-    addBtn.onclick = () => {
+    const doAdd = () => {
       const v = input.value.trim();
       if (!v) { setStatus('请输入 uid 或名字', '#ec4141'); return; }
       if (looksLikeUid(v)) { block(v, (store.seen[v] || {}).name || ''); }
@@ -751,7 +800,8 @@
       }
       input.value = '';
     };
-    input.onkeydown = (e) => { if (e.key === 'Enter') addBtn.onclick(); };
+    onPress(addBtn, doAdd);
+    input.onkeydown = (e) => { if (e.key === 'Enter') doAdd(); };
 
     document.body.appendChild(panel);
     document.body.appendChild(fab);
@@ -818,13 +868,14 @@
         border: '1px solid #444', borderRadius: '6px', boxShadow: '0 4px 16px rgba(0,0,0,.6)',
         zIndex: Z, overflow: 'hidden',
       });
+      menu.id = '__bl_menu__';
       const item = el('div', {
         padding: '8px 14px', cursor: 'pointer', whiteSpace: 'nowrap',
         color: blocked ? '#68b26d' : '#ffb4ae',
       }, (blocked ? '解除拉黑 ' : '拉黑 ') + (name || uid));
       item.onmouseenter = () => { item.style.background = '#33353f'; };
       item.onmouseleave = () => { item.style.background = 'transparent'; };
-      item.onclick = () => { if (blocked) unblock(uid); else block(uid, name); closeMenu(); };
+      onPress(item, () => { if (blocked) unblock(uid); else block(uid, name); closeMenu(); });
       menu.appendChild(item);
       document.body.appendChild(menu);
     }, true);
@@ -860,6 +911,10 @@
       get store() { return store; },
       get hooked() { return isHooked(); },          // 实时判定，不是一次性闩锁
       flush: flushSave,
+      // 三个开关的非鼠标入口（面板点不动时的备用路径，也是排障对照：API 生效但点击不生效 → 事件被站点吞了）
+      setEnabled: function (v) { store.enabled = !!v; saveStore(); if (ui) ui.refreshAll(); return store.enabled; },
+      setDebug: function (v) { store.conf.debug = !!v; saveStore(); if (ui) ui.refreshAll(); return store.conf.debug; },
+      setRightClick: function (v) { store.conf.rightClick = !!v; saveStore(); if (ui) ui.refreshAll(); return store.conf.rightClick; },
       block: block,
       unblock: unblock,
       isBlocked: isBlocked,
@@ -886,6 +941,65 @@
         sweepNode: sweepNode,
         isBlockedIn: (u) => isBlocked(u),
         lastSweep: function () { const d = lastSweepDiag; lastSweepDiag = []; return JSON.parse(JSON.stringify(d)); },
+        // 控件点不动时先跑这个：报告每个开关行/按钮的位置、实际渲染尺寸、该点位命中的元素是谁
+        // （命中元素不在该行内 → 被别的东西盖住了；尺寸为 0 → 被站点样式打没了）
+        hitTest: function () {
+          const out = [];
+          // 被祖先的 overflow 裁掉（比如名单太长滚出可视区）不算"被盖住"，要分开报，
+          // 否则真机上会误报一片"点不到"，把真问题埋掉
+          const clipped = (n, x, y) => {
+            let e = n.parentNode;
+            while (e && e !== document.body && e.nodeType === 1) {
+              const cs = getComputedStyle(e);
+              if (/(hidden|auto|scroll)/.test(cs.overflowY + ' ' + cs.overflowX)) {
+                const r = e.getBoundingClientRect();
+                if (y < r.top || y > r.bottom || x < r.left || x > r.right) return true;
+              }
+              e = e.parentNode;
+            }
+            return false;
+          };
+          const scan = (root) => {
+            if (!root) return;
+            Array.prototype.forEach.call(root.querySelectorAll('[data-bl-key],button'), (n) => {
+              const r = n.getBoundingClientRect();
+              const cx = r.left + Math.min(r.width / 2, 40), cy = r.top + r.height / 2;
+              const top = document.elementFromPoint(cx, cy);
+              const inside = !!(top && (n === top || n.contains(top)));
+              out.push({
+                what: n.dataset.blKey || ('button:' + (n.textContent || '').slice(0, 8)),
+                rect: [r.left | 0, r.top | 0, r.width | 0, r.height | 0],
+                visible: r.width > 0 && r.height > 0 && getComputedStyle(n).visibility !== 'hidden' && getComputedStyle(n).pointerEvents !== 'none',
+                topEl: top ? (top.tagName + (top.className ? '.' + String(top.className).slice(0, 24) : '')) : null,
+                insideRow: inside,
+                clippedOut: !inside && clipped(n, cx, cy),
+                state: n.dataset && n.dataset.blKey ? (n.querySelector('span') || {}).textContent : undefined,
+              });
+            });
+          };
+          scan(ui && ui.panel);
+          scan(document.getElementById('__bl_menu__'));
+          return out;
+        },
+        // 点击是不是被站点吞了：跑这个装上探针，再点一下开关，看控制台打出哪几层
+        // （只有 bubble 有 → 站点在捕获阶段 preventDefault；一层都没有 → 站点 stopPropagation）
+        watchClick: function (ms) {
+          const rep = (tag) => (e) => console.log('[点击探针] ' + tag,
+            '目标=' + (e.target && (e.target.className || e.target.tagName)),
+            'defaultPrevented=' + e.defaultPrevented,
+            '到达我的处理器=' + !!(e.target && e.target.closest && e.target.closest('[data-bl-key],button,.bl-ui')));
+          const w1 = rep('window捕获'), w2 = rep('window冒泡'), d1 = rep('document捕获'), d2 = rep('document冒泡');
+          window.addEventListener('click', w1, true);
+          window.addEventListener('click', w2);
+          document.addEventListener('click', d1, true);
+          document.addEventListener('click', d2);
+          setTimeout(() => {
+            window.removeEventListener('click', w1, true); window.removeEventListener('click', w2);
+            document.removeEventListener('click', d1, true); document.removeEventListener('click', d2);
+            console.log('[点击探针] 已卸载');
+          }, ms || 20000);
+          return '探针已装（' + ((ms || 20000) / 1000) + ' 秒后自动卸载）：现在去点一下开关';
+        },
       },
       // 真机诊断用：把当前页面结构摘要打出来（不截图也能看出选择器对不对）
       dumpDom: function () {
