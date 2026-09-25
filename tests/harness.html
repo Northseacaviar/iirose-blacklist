@@ -352,6 +352,44 @@ async function run() {
     eq(bad.length, 0, '有控件不可见或被别的元素盖住：' + JSON.stringify(bad));
   });
 
+  await t('W28 手势探针：三层都能记到，且记录到动作', async () => {
+    const p = panel();
+    ok(p, '面板没打开');
+    A._diag.clearGestures();
+    const row = p.querySelector('[data-bl-key="debug"]');
+    realClick(row);
+    await sleep(150);
+    const g = A._diag.gestures();
+    ok(g.length >= 3, '应记到 window/document/panel 三层，实际 ' + g.length + ' 条：' + JSON.stringify(g));
+    const lvls = g.map((x) => x.lvl);
+    ok(lvls.indexOf('window') >= 0 && lvls.indexOf('document') >= 0 && lvls.indexOf('panel') >= 0,
+      '三层不齐：' + lvls.join(','));
+    const act = g.filter((x) => x.ev === '切换');
+    eq(act.length, 1, '应记录 1 条动作（实际 ' + JSON.stringify(act) + '）');
+    ok(/debug=(true|false)\(按下\)/.test(act[0].extra), '动作内容应标明是哪个开关、怎么触发的：' + act[0].extra);
+  });
+
+  await t('W29 自检把结果写进面板状态行（不靠控制台也能看到）', async () => {
+    const p = panel();
+    const r = A._diag.selfCheck();
+    ok(/^自检：/.test(r.line), '自检文案格式不对：' + r.line);
+    eq(r.info.filter((i) => !i.visible || (!i.insideRow && !i.clippedOut)).length, 0, '自检发现点不到的控件：' + r.line);
+    const statusDiv = innermost((e) => /^自检：/.test(e.textContent || ''));
+    ok(statusDiv, '自检结果没写进面板：' + r.line);
+  });
+
+  await t('W30 左键失效时的备用路径：右键也能切开关', async () => {
+    const p = panel();
+    const row = p.querySelector('[data-bl-key="enabled"]');
+    const before = A.store.enabled;
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 }));
+    await sleep(120);
+    eq(A.store.enabled, !before, '右键没切换开关');
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 }));
+    await sleep(120);
+    eq(A.store.enabled, before, '再右键应切回');
+  });
+
   const fail = results.filter((r) => !r.ok);
   const summary = { total: results.length, pass: results.length - fail.length, fail: fail.length, results };
   window.__RESULT__ = summary;

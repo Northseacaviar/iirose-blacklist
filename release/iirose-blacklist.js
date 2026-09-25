@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.1.2';
+  const VERSION = '0.1.4';
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -548,11 +548,96 @@
   // 按下并在同一元素上抬起就触发，用"本次手势"标志位保证 mouseup 与配对 click 不会翻两次。
   function onPress(node, fn) {
     let pressed = false, firedByGesture = false;
-    node.addEventListener('mousedown', () => { pressed = true; firedByGesture = false; });
-    node.addEventListener('mouseup', () => { if (pressed) { fn(); firedByGesture = true; } pressed = false; });
+    const down = () => { pressed = true; firedByGesture = false; };
+    const up = () => { if (pressed) { fn(); firedByGesture = true; } pressed = false; };
+    node.addEventListener('mousedown', down);
+    node.addEventListener('mouseup', up);
+    node.addEventListener('pointerdown', down);          // 站点若只在指针事件体系里连通，鼠标事件可能被吞
+    node.addEventListener('pointerup', up);
     node.addEventListener('click', () => { if (firedByGesture) { firedByGesture = false; return; } fn(); });
     document.addEventListener('mouseup', () => { pressed = false; });   // 冒泡阶段，晚于元素自身
     return node;
+  }
+
+  // ===== 手势记录（诊断"点击到底走到哪一步"）=====
+  // 分三层挂：window / document / 面板。哪一层没记录，说明事件在那之前就被站点掐了。
+  // _diag.gestures() 取出来看；命中我方控件时 key 标出是哪个控件。
+  const gestures = [];
+  function noteGesture(lvl, ev, e, extra) {
+    try {
+      const t = e && e.target;
+      const host = t && t.closest ? t.closest('[data-bl-key],button') : null;
+      gestures.push({
+        lvl: lvl, ev: ev,
+        key: host ? (host.dataset && host.dataset.blKey ? host.dataset.blKey : 'button:' + (host.textContent || '').slice(0, 6)) : '',
+        tgt: t ? (t.tagName + (t.className ? '.' + String(t.className).slice(0, 16) : '')) : '',
+        xy: [Math.round((e && e.clientX) || 0), Math.round((e && e.clientY) || 0)],
+        dp: !!(e && e.defaultPrevented),
+        extra: extra || '',
+      });
+      if (gestures.length > 40) gestures.shift();
+    } catch (_) { }
+  }
+  function installGestureProbes(panel) {
+    const evs = ['mousedown', 'mouseup', 'click', 'pointerdown', 'pointerup', 'contextmenu'];
+    const bind = (lvl, node, capture) => {
+      evs.forEach((ev) => node.addEventListener(ev, (e) => noteGesture(lvl, ev, e), capture));
+    };
+    try { bind('window', window, true); bind('document', document, true); } catch (_) { }
+    if (panel) bind('panel', panel, false);
+  }
+
+  // ===== 控件自检：面板上每个开关行/按钮到底能不能点到 =====
+  // 被祖先 overflow 裁掉（名单太长滚出可视区）不算"被盖住"，要分开报，否则真机会误报一片、把真问题埋掉
+  function clippedByAncestor(n, x, y) {
+    let e = n.parentNode;
+    while (e && e !== document.body && e.nodeType === 1) {
+      const cs = getComputedStyle(e);
+      if (/(hidden|auto|scroll)/.test(cs.overflowY + ' ' + cs.overflowX)) {
+        const r = e.getBoundingClientRect();
+        if (y < r.top || y > r.bottom || x < r.left || x > r.right) return true;
+      }
+      e = e.parentNode;
+    }
+    return false;
+  }
+  function hitTestControls() {
+    const out = [];
+    const scan = (root) => {
+      if (!root) return;
+      Array.prototype.forEach.call(root.querySelectorAll('[data-bl-key],button'), (n) => {
+        const r = n.getBoundingClientRect();
+        const cx = r.left + Math.min(r.width / 2, 40), cy = r.top + r.height / 2;
+        const top = document.elementFromPoint(cx, cy);
+        const inside = !!(top && (n === top || n.contains(top)));
+        out.push({
+          what: n.dataset.blKey || ('button:' + (n.textContent || '').slice(0, 8)),
+          rect: [r.left | 0, r.top | 0, r.width | 0, r.height | 0],
+          visible: r.width > 0 && r.height > 0 && getComputedStyle(n).visibility !== 'hidden' && getComputedStyle(n).pointerEvents !== 'none',
+          topEl: top ? (top.tagName + (top.className ? '.' + String(top.className).slice(0, 24) : '')) : null,
+          insideRow: inside,
+          clippedOut: !inside && clippedByAncestor(n, cx, cy),
+          state: n.dataset && n.dataset.blKey ? (n.querySelector('span') || {}).textContent : undefined,
+        });
+      });
+    };
+    scan(ui && ui.panel);
+    scan(document.getElementById('__bl_menu__'));
+    return out;
+  }
+  function selfCheck() {
+    const info = hitTestControls();
+    const bad = info.filter((i) => !i.visible || (!i.insideRow && !i.clippedOut));
+    const line = bad.length
+      ? ('自检：' + bad.length + '/' + info.length + ' 个控件点不到 → ' + bad.map((b) => b.what + '(该点位是 ' + b.topEl + ')').join('；'))
+      : ('自检：' + info.length + ' 个控件命中正常');
+    log(line);
+    // 写进常驻自检行（不是状态行——状态行会被后续操作覆盖，结论就丢了）
+    if (ui && ui.diagLine) {
+      ui.diagLine.textContent = line + (bad.length ? '' : '（点不动就右键开关行，或跑 _diag.gestures()）');
+      ui.diagLine.style.setProperty('color', bad.length ? '#d0a04a' : '#7f8794', 'important');
+    }
+    return { line: line, info: info };
   }
 
   // 自绘开关：不依赖原生控件的渲染与默认动作，整行可点（方框+文字都算），键盘也能切
@@ -577,8 +662,18 @@
       label.style.setProperty('color', on ? '#eee' : '#888', 'important');
     }
     paint();
-    onPress(row, () => { on = !on; paint(); onChange(on); });
-    row.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); on = !on; paint(); onChange(on); } });
+    const fire = (how) => {
+      on = !on; paint(); onChange(on);
+      noteGesture('action', '切换', { target: row, clientX: 0, clientY: 0 }, (row.dataset.blKey || '') + '=' + on + '(' + how + ')');
+    };
+    onPress(row, () => fire('按下'));
+    // 按下高亮：也是个可见探针——按住时行背景变亮，说明 mousedown 到了这一行
+    row.addEventListener('mousedown', () => { row.style.setProperty('background', '#33353f', 'important'); });
+    row.addEventListener('mouseleave', () => { row.style.setProperty('background', 'transparent', 'important'); });
+    document.addEventListener('mouseup', () => { row.style.setProperty('background', 'transparent', 'important'); });
+    // 右键切换：右键通道（contextmenu）在本站已证实可用，作为左键失效时的备用路径
+    row.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); fire('右键'); });
+    row.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); fire('键盘'); } });
     row.appendChild(box); row.appendChild(label);
     row.__set = (v) => { on = !!v; paint(); };
     return row;
@@ -689,6 +784,9 @@
     panel.appendChild(stats);
     const warn = el('div', { padding: '0 12px 6px', color: '#d0a04a', fontSize: '11px', display: 'none' });
     panel.appendChild(warn);
+    const diagLine = el('div', { padding: '6px 12px', color: '#7f8794', fontSize: '11px', lineHeight: '1.5' }, '自检：面板打开后 1 秒自动跑');
+    panel.appendChild(diagLine);
+
     const foot = el('div', { display: 'flex', gap: '6px', padding: '0 12px 10px' });
     const copyBtn = el('button', {
       background: '#2a2b33', color: '#bbb', border: '1px solid #444', borderRadius: '5px',
@@ -781,6 +879,8 @@
       else warn.style.display = 'none';
     }
 
+    installGestureProbes(panel);
+
     function refreshAll() {
       refreshBlacklist(); refreshSeen(); refreshStats();
       enableToggle.__set(store.enabled);
@@ -807,11 +907,14 @@
     document.body.appendChild(fab);
     makeDraggable(fab, fab, () => {
       panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
-      if (panel.style.display === 'flex') refreshAll();
+      if (panel.style.display === 'flex') {
+        refreshAll();
+        setTimeout(() => { try { selfCheck(); } catch (e) { noteError('自检失败', e); } }, 1200);
+      }
     });
     makeDraggable(panel, title);
 
-    ui = { panel, fab, setStatus, refreshAll, refreshSeen, refreshStats, refreshBlacklist };
+    ui = { panel, fab, setStatus, refreshAll, refreshSeen, refreshStats, refreshBlacklist, diagLine };
     refreshAll();
   }
 
@@ -942,45 +1045,14 @@
         isBlockedIn: (u) => isBlocked(u),
         lastSweep: function () { const d = lastSweepDiag; lastSweepDiag = []; return JSON.parse(JSON.stringify(d)); },
         // 控件点不动时先跑这个：报告每个开关行/按钮的位置、实际渲染尺寸、该点位命中的元素是谁
-        // （命中元素不在该行内 → 被别的东西盖住了；尺寸为 0 → 被站点样式打没了）
-        hitTest: function () {
-          const out = [];
-          // 被祖先的 overflow 裁掉（比如名单太长滚出可视区）不算"被盖住"，要分开报，
-          // 否则真机上会误报一片"点不到"，把真问题埋掉
-          const clipped = (n, x, y) => {
-            let e = n.parentNode;
-            while (e && e !== document.body && e.nodeType === 1) {
-              const cs = getComputedStyle(e);
-              if (/(hidden|auto|scroll)/.test(cs.overflowY + ' ' + cs.overflowX)) {
-                const r = e.getBoundingClientRect();
-                if (y < r.top || y > r.bottom || x < r.left || x > r.right) return true;
-              }
-              e = e.parentNode;
-            }
-            return false;
-          };
-          const scan = (root) => {
-            if (!root) return;
-            Array.prototype.forEach.call(root.querySelectorAll('[data-bl-key],button'), (n) => {
-              const r = n.getBoundingClientRect();
-              const cx = r.left + Math.min(r.width / 2, 40), cy = r.top + r.height / 2;
-              const top = document.elementFromPoint(cx, cy);
-              const inside = !!(top && (n === top || n.contains(top)));
-              out.push({
-                what: n.dataset.blKey || ('button:' + (n.textContent || '').slice(0, 8)),
-                rect: [r.left | 0, r.top | 0, r.width | 0, r.height | 0],
-                visible: r.width > 0 && r.height > 0 && getComputedStyle(n).visibility !== 'hidden' && getComputedStyle(n).pointerEvents !== 'none',
-                topEl: top ? (top.tagName + (top.className ? '.' + String(top.className).slice(0, 24) : '')) : null,
-                insideRow: inside,
-                clippedOut: !inside && clipped(n, cx, cy),
-                state: n.dataset && n.dataset.blKey ? (n.querySelector('span') || {}).textContent : undefined,
-              });
-            });
-          };
-          scan(ui && ui.panel);
-          scan(document.getElementById('__bl_menu__'));
-          return out;
-        },
+        // （命中元素不在该行内 → 被别的东西盖住了；尺寸为 0 → 面板根本没显示）
+        hitTest: hitTestControls,
+        // 自检（打开面板时已自动跑过一次，结果同时写在面板底部状态行）
+        selfCheck: selfCheck,
+        // 手势记录：点几下之后跑这个，看事件走到了哪一层
+        // 只有 window 有 → document 那层之前就断了；三层都有但没有 action 条目 → 事件到了、处理器没跑
+        gestures: function () { return JSON.parse(JSON.stringify(gestures)); },
+        clearGestures: function () { gestures.length = 0; return 'ok'; },
         // 点击是不是被站点吞了：跑这个装上探针，再点一下开关，看控制台打出哪几层
         // （只有 bubble 有 → 站点在捕获阶段 preventDefault；一层都没有 → 站点 stopPropagation）
         watchClick: function (ms) {
