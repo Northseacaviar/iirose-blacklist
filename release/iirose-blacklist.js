@@ -1,5 +1,5 @@
 /*!
- * iirose 拉黑屏蔽 · iirose-blacklist v0.1.1
+ * iirose 拉黑屏蔽 · iirose-blacklist v0.1.9
  * 作者：Corvin Hermes（为北海做）
  *
  * 作用：在 iirose（蔷薇花园）里拉黑某人后 ——
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.1.8';
+  const VERSION = '0.1.9';
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -735,31 +735,64 @@
   }
 
   function makeDraggable(node, handle, onClick, onDrop) {
+    // 手机适配（v0.1.9）：改用指针事件 —— 触屏上没有 mouse 事件，原来那套在手机上根本拖不动。
+    // 用 setPointerCapture 保证手指滑出元素后仍持续收到 move；用 touch-action:none 防止页面跟着滚。
     let sx = 0, sy = 0, ox = 0, oy = 0, moved = 0, dragging = false;
-    handle.addEventListener('mousedown', (e) => {
-      dragging = true; moved = 0;
+    let gid = 0, ended = -1, usingPointer = false;             // 一个手势只结算一次（指针 + 鼠标两套事件会各触发一遍）
+    try { handle.style.touchAction = 'none'; } catch (_) { }
+    const start = (e) => {
+      if (e.pointerType === 'mouse' && e.button) return;      // 只认左键
+      gid++; dragging = true; moved = 0;
       sx = e.clientX; sy = e.clientY;
       ox = node.offsetLeft; oy = node.offsetTop;
-      e.preventDefault();
-    });
-    document.addEventListener('mousemove', (e) => {
+      try { if (e.pointerId !== undefined && handle.setPointerCapture) handle.setPointerCapture(e.pointerId); } catch (_) { }
+      if (e.cancelable) e.preventDefault();
+    };
+    const move = (e) => {
       if (!dragging) return;
       const dx = e.clientX - sx, dy = e.clientY - sy;
       moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
-      node.style.left = (ox + dx) + 'px';
-      node.style.top = (oy + dy) + 'px';
-    });
-    document.addEventListener('mouseup', () => {
-      if (dragging && moved < 5 && onClick) onClick();
-      else if (dragging && moved >= 5 && onDrop) onDrop(node.offsetLeft, node.offsetTop);
-      dragging = false;
-    });
+      if (moved > 3) { node.style.left = (ox + dx) + 'px'; node.style.top = (oy + dy) + 'px'; }
+    };
+    const end = () => {
+      if (!dragging || ended === gid) return;                // 同一手势的 mouseup/pointerup 只认第一次
+      ended = gid; dragging = false;
+      if (moved < 5) { if (onClick) onClick(); }
+      else if (onDrop) onDrop(node.offsetLeft, node.offsetTop);
+    };
+    handle.addEventListener('pointerdown', (e) => { usingPointer = true; start(e); });
+    handle.addEventListener('pointerup', () => { usingPointer = false; end(); });
+    handle.addEventListener('pointercancel', () => { dragging = false; });
+    handle.addEventListener('pointermove', move);
+    // 鼠标这条线保留：① 老浏览器没有 PointerEvent；② 有些环境（测试夹具、被站点改造过的合成事件）
+    // 只发 mouse 事件不发 pointer 事件 —— 真机实测 pointerdown 先到，所以有指针事件时忽略这对鼠标事件。
+    handle.addEventListener('mousedown', (e) => { if (usingPointer) return; start(e); });
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', () => { end(); });
+  }
+
+  // 手机适配（v0.1.9）：原来悬浮球固定用 (innerWidth-60, innerHeight-260)。
+  // 视口一矮（手机浏览器地址栏/键盘、站点把聊天区塞进较矮的 iframe）top 就变成负数 → 球跑到屏幕外，
+  // 表现就是「手机上不显示悬浮窗」。现在：算完钳进视口 + 视口变化时自愈。
+  const FAB_SIZE = (typeof window !== 'undefined' && window.innerWidth < 520) ? 52 : 46;
+  function clampToViewport(left, top, w, h) {
+    const vw = window.innerWidth || 0, vh = window.innerHeight || 0;
+    const maxL = Math.max(4, vw - (w || FAB_SIZE) - 4), maxT = Math.max(4, vh - (h || FAB_SIZE) - 4);
+    return { left: Math.round(Math.min(Math.max(4, left), maxL)), top: Math.round(Math.min(Math.max(4, top), maxT)) };
+  }
+  function defaultFabPos() {
+    const vw = window.innerWidth || 0, vh = window.innerHeight || 0;
+    let left = vw - 60, top = vh - 260;
+    if (vw < 520) { left = vw - FAB_SIZE - 8; top = vh - 108; }   // 窄屏：右下角上方，保证可见可点
+    if (top < 8) top = vh - FAB_SIZE - 60;
+    return clampToViewport(left, top, FAB_SIZE, FAB_SIZE);
   }
 
   function buildUi() {
+    const fabPos0 = defaultFabPos();
     const fab = el('div', {
-      position: 'fixed', left: (window.innerWidth - 60) + 'px', top: (window.innerHeight - 260) + 'px',
-      width: '46px', height: '46px', borderRadius: '50%', background: '#b3261e', color: '#fff',
+      position: 'fixed', left: fabPos0.left + 'px', top: fabPos0.top + 'px',
+      width: FAB_SIZE + 'px', height: FAB_SIZE + 'px', borderRadius: '50%', background: '#b3261e', color: '#fff',
       fontSize: '20px', cursor: 'grab', boxShadow: '0 4px 14px rgba(0,0,0,.5)', zIndex: Z,
       display: 'flex', alignItems: 'center', justifyContent: 'center', userSelect: 'none', touchAction: 'none',
     }, '🚫');
@@ -961,6 +994,32 @@
 
     document.body.appendChild(panel);
     document.body.appendChild(fab);
+
+    // 自愈：球被挤出视口/尺寸归零（手机视口变化、键盘弹出、站点重排）就拉回右下角
+    function keepInView() {
+      try {
+        const r = fab.getBoundingClientRect();
+        const lost = !r.width || !r.height || r.right <= 2 || r.bottom <= 2 ||
+                     r.left >= (window.innerWidth || 0) - 2 || r.top >= (window.innerHeight || 0) - 2;
+        const p = lost ? defaultFabPos() : clampToViewport(r.left, r.top, r.width, r.height);
+        if (lost || p.left !== Math.round(r.left) || p.top !== Math.round(r.top)) {
+          fab.style.left = p.left + 'px'; fab.style.top = p.top + 'px';
+        }
+      } catch (_) { }
+      try {
+        const pr = panel.getBoundingClientRect();
+        if (panel.style.display !== 'none' && pr.width) {
+          const p2 = clampToViewport(pr.left, pr.top, pr.width, pr.height);
+          if (p2.left !== Math.round(pr.left) || p2.top !== Math.round(pr.top)) {
+            panel.style.left = p2.left + 'px'; panel.style.top = p2.top + 'px';
+          }
+        }
+      } catch (_) { }
+    }
+    keepInView();
+    window.addEventListener('resize', keepInView);
+    window.addEventListener('orientationchange', () => { setTimeout(keepInView, 400); });
+    setTimeout(keepInView, 1500);        // 手机地址栏收放/键盘引起的二次变化，再兜一次
     // 摆放策略：① 记住的（用户拖到的）位置 → ② 悬浮球旁边 → ③ 四角，取第一个"点得到"的。
     // 为什么：真机上证实过——面板停在某块区域时点击会被别的元素接走（看得见、点不动），
     // 而悬浮球所在的区域必定点得到（否则面板根本打不开），所以以它为中心往外找。
@@ -1046,6 +1105,31 @@
     let menu = null;
     function closeMenu() { if (menu && menu.parentNode) menu.parentNode.removeChild(menu); menu = null; }
     document.addEventListener('mousedown', (e) => { if (menu && !menu.contains(e.target)) closeMenu(); }, true);
+    // 手机适配（v0.1.9）：触屏没有右键 —— 长按头像约 0.55 秒等同一次右键（合成 contextmenu 走同一条路）
+    let lpTimer = null, lpMoved = false, lpXY = null;
+    document.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' || !store.conf.rightClick) return;
+      const t = e.target;
+      if (!t || !t.closest) return;
+      const host = t.closest('.msgavatar,[data-uid],[ip]');
+      if (!host) return;
+      lpMoved = false; lpXY = [e.clientX, e.clientY];
+      clearTimeout(lpTimer);
+      lpTimer = setTimeout(() => {
+        if (lpMoved) return;
+        try {
+          host.dispatchEvent(new MouseEvent('contextmenu', {
+            bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY,
+          }));
+        } catch (_) { }
+      }, 550);
+    }, true);
+    document.addEventListener('pointermove', (e) => {
+      if (!lpXY) return;
+      if (Math.abs(e.clientX - lpXY[0]) + Math.abs(e.clientY - lpXY[1]) > 8) lpMoved = true;
+    }, true);
+    document.addEventListener('pointerup', () => { clearTimeout(lpTimer); lpXY = null; }, true);
+    document.addEventListener('pointercancel', () => { clearTimeout(lpTimer); lpXY = null; }, true);
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); }, true);
 
     document.addEventListener('contextmenu', (e) => {

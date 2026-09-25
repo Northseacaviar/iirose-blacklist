@@ -73,6 +73,20 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
 4. 自测：`node tests/core.test.js`（核心逻辑 32 项）、浏览器打开 `tests/harness.html`（联调 27 项，含假 socket 重连自愈、"站点式 click preventDefault"下控件仍可用）
 5. 面板点不动时的排障：`__IIROSE_BLACKLIST__._diag.hitTest()` 看控件是否被盖住/尺寸归零；`__IIROSE_BLACKLIST__._diag.watchClick()` 装点击探针，再点一下开关，看控制台打出哪几层事件；`setEnabled/setDebug/setRightClick` 是不依赖鼠标的备用入口
 
+## 手机（触屏）怎么用
+
+1. **注入**：手机浏览器里用站点终端（`js`）粘地址，或把下面这段存成书签、进站后点一下（书签在触屏上没有右键，长按书签→编辑可以改地址）：
+
+   ```
+   javascript:(function(){var f=document.getElementById('mainFrame'),d=f&&f.contentDocument;if(!d){alert('没找到 #mainFrame');return}var s=d.createElement('script');s.src='https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js';d.body.appendChild(s)})()
+   ```
+2. **悬浮球**：默认落在视口内（窄屏自动改大小 52px 并靠右下）；可拖动，拖过的位置会记住；视口变化后如果它被挤出屏幕，会自己拉回来。
+3. **拉黑**：长按某人头像约 0.55 秒 = 右键菜单（触屏没有右键）；也可以点悬浮球开面板，在「见过的人」里点拉黑。
+4. **排查手机端「不显示悬浮窗」**：注入 `mobile-probe.js`（同目录），它会在页面顶部挂一条红色横幅，直接写出：脚本跑在哪个上下文、视口多大、插件有没有落地、悬浮球在哪/被谁盖住、有没有脚本报错、`extJs` 里有没有地址。
+   ```
+   https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/mobile-probe.js
+   ```
+
 ## 真机待验证项（README 随代码更新）
 
 - **A3 的私聊历史**：实时私聊帧已确认可丢；若站点在打开私聊窗口时另用 HTTP/快照补历史消息，需要另补清扫路径。
@@ -84,6 +98,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
 
 ## 版本
 
+- v0.1.9（2026-09-25）：**手机（触屏）适配** —— 悬浮球默认位置改成"钳进视口"，视口一矮（手机地址栏/键盘、聊天区被塞进较矮的 iframe）不再跑到屏幕外；视口变化/旋转后自动自愈。拖动改用指针事件（触屏原来根本拖不动），并给触屏加了**长按头像 0.55 秒 = 右键拉黑菜单**。回归：核心 33/33、浏览器联调 32/32；另在真实 Chrome 的 390×844 / 390×240 / 1280×720 三种视口下核对过悬浮球与面板都在视口内
 - v0.1.8（2026-09-25）：**真机验收通过**（房间/私聊屏蔽、历史清扫、开关可用、刷新后仍生效）。此版把"覆盖检查"搬进面板自检行：默认位置若被别的元素盖住，面板会自己点名并自动避开
 - v0.1.7（2026-09-25）：修「面板看得见、点不动」。真机根因是**位置**：面板原来待的那块区域有别的元素（父页面层或别的注入插件留下的透明层）把点击接走了 —— 渲染不受影响，所以面板看得见；而插件所在 iframe 自己的命中检测（elementFromPoint）看不见 iframe 外面的东西，所以自检一直报"命中正常"。修法：① 打开面板时自动检查该位置能不能点到（把坐标映射到父页面，看最上层元素是不是本 iframe），点不到就依次试「记住的位置 → 悬浮球左右上下 → 左上/右上角」，挑第一个点得到的；② 面板位置可拖动并持久化（`conf.panel`）；③ 自检行显示最终选择。新增 `_diag.whoCovers(x, y)`、`tests/frame-cover.html`（父页面覆盖层复现页，已用它验证过修复）。回归：核心 33/33、浏览器联调 32/32，另用 CDP 可信鼠标事件在覆盖层场景下真点击验证
 - v0.1.4（2026-09-25）：面板加常驻自检行（打开面板 1 秒后自动跑，直接把结论写在面板上，不靠控制台）+ 分层手势探针 `_diag.gestures()`（window/document/面板三层分别记录，看事件走到哪一层断掉）+ 开关的备用通道（右键开关行、Tab+空格、`setEnabled/setDebug/setRightClick`）+ 按下高亮（按住时行背景变亮 = mousedown 确实到了这一行）
