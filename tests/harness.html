@@ -9,9 +9,16 @@
 <div id="box">跑测试中…</div>
 
 <!-- 假 DOM：房间消息区 + 私聊会话列表（结构照 iiroseForge 依赖的选择器） -->
-<div class="msgholderBox" id="msgHolder">
-  <div class="msg" data-id="old000000002b_1700000000"><div class="wrap"><div class="msgavatar" data-uid="old000000002b"></div><div class="msgtext">旧消息</div></div></div>
-  <div class="pubMsgSystem"><div><div data-uid="keep00000004d">系统提示：某人进入房间</div></div></div>
+<!-- #msgholder 是真机房间聊天区的容器（插件用它判定"这是房间，不是私聊窗口"） -->
+<div id="msgholder">
+  <div class="msgholderBox" id="msgHolder">
+    <div class="msg" data-id="old000000002b_1700000000"><div class="wrap"><div class="msgavatar" data-uid="old000000002b"></div><div class="msgtext">旧消息</div></div></div>
+    <div class="pubMsgSystem"><div><div data-uid="keep00000004d">系统提示：某人进入房间</div></div></div>
+  </div>
+</div>
+<!-- 私聊窗口：结构故意与房间不同（外层容器带 data-uid，消息文字不在头像里）—— 长按文字不得弹拉黑菜单 -->
+<div id="pmWindow">
+  <div class="pmMsgBox" data-uid="pmold0000003c"><div class="pmText">私聊里的一句话，长按要能复制</div></div>
 </div>
 <div id="pmList">
   <div class="pmItem" ip="pmold0000003c"><span>私聊对象</span><i class="badge">2</i></div>
@@ -227,24 +234,41 @@ async function run() {
     await sleep(120);
     eq(A.isBlocked(ID.OTHER), true, '按名字没能拉黑：' + p.textContent.slice(0, 200));
   });
-  await t('W19 右键消息头像 -> 拉黑菜单可点生效', async () => {
+  await t('W19 拉黑只走面板：右键/长按消息头像都不该再弹任何菜单（v0.2.4 起入口已移除）', async () => {
     const h = document.getElementById('msgHolder');
     const node = document.createElement('div');
     node.className = 'msg'; node.dataset.id = ID.RIGHT + '_1700008888';
     node.innerHTML = '<div class="wrap"><div class="msgavatar" data-uid="' + ID.RIGHT + '"></div>右键我</div>';
     h.appendChild(node);
     const av = node.querySelector('.msgavatar');
+    // 右键
     av.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 120 }));
-    await sleep(60);
-    const menuBox = Array.from(document.querySelectorAll('div')).filter((e) => e.parentElement === document.body && e.style.position === 'fixed' && /^(拉黑 |解除拉黑 )/.test(e.textContent || ''));
-    const item = menuBox.length ? menuBox[0].firstElementChild : null;
-    ok(item, '右键菜单没出现');
-    item.click();
+    await sleep(80);
+    // 触屏长按
+    av.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true, cancelable: true, pointerId: 1, pointerType: 'touch', isPrimary: true, clientX: 120, clientY: 120,
+    }));
+    await sleep(700);
+    const menus = Array.from(document.querySelectorAll('div')).filter((e) => e.parentElement === document.body
+      && e.style.position === 'fixed' && /^(拉黑 |解除拉黑 )/.test(e.textContent || ''));
+    eq(menus.length, 0, '还弹出了拉黑菜单：' + menus.map((m) => m.textContent).join('|'));
+    eq(A.isBlocked(ID.RIGHT), false, '光右键/长按不该把人拉黑');
+    // 面板（贴 UID 点「拉黑」）才是唯一入口 —— 这条不能坏
+    const p = panel();
+    ok(p, '面板没打开');
+    const input = p.querySelector('input');
+    ok(input, '找不到 UID 输入框');
+    input.value = ID.RIGHT;
+    const addBtn = Array.from(p.querySelectorAll('button')).find((b) => b.textContent === '拉黑');
+    ok(addBtn, '找不到「拉黑」按钮');
+    realClick(addBtn);
     await sleep(150);
-    eq(A.isBlocked(ID.RIGHT), true);
-    // 再右键一次应是「解除拉黑」
-    ok(!document.body.contains(item), '菜单没关掉');
+    ok(A.isBlocked(ID.RIGHT), '面板里贴 UID 点拉黑没生效（这是现在唯一的入口，不能坏）');
+    A.unblock(ID.RIGHT);
+    await sleep(60);
+    if (node.parentNode) node.parentNode.removeChild(node);
   });
+
   await t('W20 dumpDom 探针可用（真机排障用）', () => {
     const d = A.dumpDom();
     eq(d.version, A.version); eq(d.msgholderBox, true); eq(d.myUid, 'myown0000001a');
@@ -292,38 +316,24 @@ async function run() {
     eq(fabsAfter, fabsBefore, '不该多出一个悬浮球');
   });
 
-  await t('W24 面板可关掉右键拉黑菜单', async () => {
+  await t('W24 面板开关行齐全（5 个），且已没有「右键弹拉黑菜单」这一行', async () => {
     const p = panel();
     ok(p, '面板没打开');
     const rows = Array.from(p.querySelectorAll('[data-bl-key]'));
-    ['enabled', 'debug', 'rightClick', 'keepHistory', 'clearCards', 'hideSession'].forEach((k) => {
+    ['enabled', 'debug', 'keepHistory', 'clearCards', 'hideSession'].forEach((k) => {
       ok(rows.some((r) => r.dataset.blKey === k), '缺开关行：' + k);
     });
-    eq(rows.length, 6, '开关行数应为 6，实际 ' + rows.length);
-    const rcRow = p.querySelector('[data-bl-key="rightClick"]');
-    ok(rcRow, '找不到"右键头像弹拉黑菜单"开关行');
-    eq(rcRow.querySelector('span').textContent, '✓', '开关默认应为开（方框里应有勾）');
-    realClick(rcRow);
+    eq(rows.length, 5, '开关行数应为 5，实际 ' + rows.length);
+    eq(p.querySelector('[data-bl-key="rightClick"]'), null, '「右键弹拉黑菜单」开关行应已移除');
+    const sw = p.querySelector('[data-bl-key="debug"]');
+    eq(sw.querySelector('span').textContent, '', '开关默认应为关（方框里应空）');
+    realClick(sw);
     await sleep(80);
-    eq(rcRow.querySelector('span').textContent, '', '点一下方框里的勾应消失');
-    eq(A.store.conf.rightClick, false);
-    // 关掉后再右键头像，不该出现菜单
-    const h = document.getElementById('msgHolder');
-    const node = document.createElement('div');
-    node.className = 'msg'; node.dataset.id = ID.OTHER + '_1700077777';
-    node.innerHTML = '<div class="msgavatar" data-uid="' + ID.OTHER + '"></div>x';
-    h.appendChild(node);
-    node.querySelector('.msgavatar').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 200 }));
+    eq(sw.querySelector('span').textContent, '✓', '点一下应打勾');
+    eq(A.store.conf.debug, true);
+    realClick(sw);
     await sleep(80);
-    // 精确识别"菜单容器"：body 直接子节点、fixed、文字就是一条菜单项（面板自身含"已拉黑 xxx"会被误判）
-    const isMenu = (e) => e.parentElement === document.body && e.style.position === 'fixed'
-      && /^(拉黑 |解除拉黑 )/.test(e.textContent || '');
-    const menu = Array.from(document.querySelectorAll('div')).filter(isMenu);
-    eq(menu.length, 0, '关掉开关后仍弹了菜单：' + menu.map((m) => m.textContent).join('|'));
-    realClick(rcRow);
-    await sleep(80);
-    eq(A.store.conf.rightClick, true, '再点一下应恢复');
-    eq(rcRow.querySelector('span').textContent, '✓');
+    eq(A.store.conf.debug, false, '再点一下应恢复');
   });
 
   await t('W25 站点 preventDefault 拦掉默认动作时，三个开关照样能切（本次踩的坑）', async () => {
@@ -351,14 +361,12 @@ async function run() {
     console.log('[harness] 本页 document 捕获阶段 click 默认动作已被 preventDefault（模拟站点）：', prevented);
   });
 
-  await t('W26 面板点不动时的备用入口：API setEnabled/setDebug/setRightClick', async () => {
+  await t('W26 面板点不动时的备用入口：API setEnabled/setDebug', async () => {
     eq(A.setEnabled(false), false);
     eq(A.store.enabled, false);
     eq(A.setEnabled(true), true);
     eq(A.setDebug(true), true);
     eq(A.setDebug(false), false);
-    eq(A.setRightClick(false), false);
-    eq(A.setRightClick(true), true);
     const p = panel();
     eq(p.querySelector('[data-bl-key="enabled"]').querySelector('span').textContent, '✓', 'API 改了状态，方框应同步');
   });
@@ -725,6 +733,46 @@ async function run() {
     ok(h.contains(his), '别人的消息被误清（零影响被破坏）');
     his.parentNode && his.parentNode.removeChild(his);
     A.unblock(uid);
+  });
+
+  // ---------------- v0.2.3：长按拉黑菜单的范围与取消（真机反馈） ----------------
+  const touchDown = (node, x, y) => {
+    node.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true, cancelable: true, pointerId: 1, pointerType: 'touch', isPrimary: true,
+      clientX: x === undefined ? 10 : x, clientY: y === undefined ? 10 : y,
+    }));
+  };
+  const menuNow = () => Array.from(document.querySelectorAll('div'))
+    .filter((e) => e.parentElement === document.body && e.style.position === 'fixed' && /^(拉黑 |解除拉黑 )/.test(e.textContent || ''))[0] || null;
+
+  await t('W48 触屏长按：房间头像、私聊消息文字、私聊会话项 —— 一律不弹拉黑菜单', async () => {
+    const h = document.getElementById('msgHolder');
+    const row = document.createElement('div');
+    row.className = 'msg'; row.dataset.id = 'lptest00001a_1700099100';
+    row.innerHTML = '<div class="wrap"><div class="msgavatar" data-uid="lptest00001a"></div>长按我头像</div>';
+    h.appendChild(row);
+    const targets = [row.querySelector('.msgavatar'), document.querySelector('#pmWindow .pmText'),
+      document.querySelector('#pmList .pmItem')];
+    targets.forEach((node) => ok(node, '夹具节点缺失'));
+    for (const node of targets) {
+      node.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true, cancelable: true, pointerId: 1, pointerType: 'touch', isPrimary: true, clientX: 30, clientY: 30,
+      }));
+      await sleep(650);
+      eq(menuNow(), null, '长按弹出了拉黑菜单（已拆除的入口又活了）');
+    }
+    if (row.parentNode) row.parentNode.removeChild(row);
+  });
+
+  await t('W49 触屏长按不再吃"长按复制"：私聊文字上没有任何菜单、也没被 preventDefault 掉', async () => {
+    const pmText = document.querySelector('#pmWindow .pmText');
+    const ev = new PointerEvent('pointerdown', {
+      bubbles: true, cancelable: true, pointerId: 1, pointerType: 'touch', isPrimary: true, clientX: 20, clientY: 20,
+    });
+    pmText.dispatchEvent(ev);
+    await sleep(650);
+    eq(ev.defaultPrevented, false, '长按文字被 preventDefault 了 —— 系统复制菜单会被顶掉');
+    eq(menuNow(), null, '长按文字后出现了菜单');
   });
 
   const fail = results.filter((r) => !r.ok);
