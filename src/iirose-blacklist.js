@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.1.7';
+  const VERSION = '0.1.8';
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -664,6 +664,22 @@
     scan(document.getElementById('__bl_menu__'));
     return out;
   }
+  // 面板"默认位置"是否被别的东西盖住 —— 结论直接写进面板自检行，不必开控制台。
+  // 默认位置取的是 (innerWidth-340, innerHeight-450)，也就是原右下角面板里开关那一行所在处。
+  function coverageNote() {
+    const pd = parentDocument();
+    if (!pd) return '';
+    try {
+      const fe = window.frameElement;
+      const fr = fe.getBoundingClientRect();
+      const x = Math.round(window.innerWidth - 340), y = Math.round(window.innerHeight - 450);
+      const top = pd.elementFromPoint(Math.round(fr.left + x), Math.round(fr.top + y));
+      if (!top || top === fe || (top.contains && top.contains(fe))) return '';
+      return '｜默认区域被 ' + top.tagName
+        + (top.id ? '#' + top.id : (top.className ? '.' + String(top.className).split(' ')[0] : '')) + ' 盖住';
+    } catch (_) { return ''; }
+  }
+
   function selfCheck() {
     const info = hitTestControls();
     const bad = info.filter((i) => !i.visible || (!i.insideRow && !i.clippedOut));
@@ -673,10 +689,10 @@
     log(line);
     // 写进常驻自检行（不是状态行——状态行会被后续操作覆盖，结论就丢了）
     if (ui && ui.diagLine) {
-      ui.diagLine.textContent = line + (lastPlacement ? '｜面板位置：' + lastPlacement : '') + (bad.length ? '' : '（点不动就右键开关行，或跑 _diag.gestures()）');
+      ui.diagLine.textContent = line + (lastPlacement ? '｜面板位置：' + lastPlacement : '') + coverageNote() + (bad.length ? '' : '（点不动就右键开关行）');
       ui.diagLine.style.setProperty('color', bad.length ? '#d0a04a' : '#7f8794', 'important');
     }
-    return { line: line, info: info };
+    return { line: line, info: info, placement: lastPlacement, covered: coverageNote() };
   }
 
   // 自绘开关：不依赖原生控件的渲染与默认动作，整行可点（方框+文字都算），键盘也能切
