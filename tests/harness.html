@@ -627,6 +627,18 @@ async function run() {
     A.unblock('blk00000001q');
   });
 
+  await t('W43 注入形态下存储走本地，且自检行写明存储方式（官方形态另有 official-mode.html 专页验）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    const st = A.storage();
+    eq(st.mode, 'local', '没有 Ext.Service 时应走本地存储');
+    eq(A.pkg().installed, false, '没有官方运行时时不该登记包信息');
+    eq(!!localStorage.getItem('iirose_blacklist_v1'), true, '本地形态应真的写到 localStorage');
+    const p = panel();
+    ok(p, '面板没打开');
+    const r = A._diag.selfCheck();
+    ok(/存储：/.test(r.line), '自检行应写明存储方式：' + r.line);
+  });
+
   const fail = results.filter((r) => !r.ok);
   const summary = { total: results.length, pass: results.length - fail.length, fail: fail.length, results };
   window.__RESULT__ = summary;

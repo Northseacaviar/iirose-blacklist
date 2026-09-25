@@ -23,6 +23,43 @@ function loadCore() {
   return L;
 }
 
+// STORAGE 区块（官方外壳 + 存储适配）单独 extract 跑：可注入假的 Ext / localStorage
+function loadStorage(opts) {
+  const src = fs.readFileSync(SRC, 'utf8');
+  const m = src.match(/\/\/ #region STORAGE([\s\S]*?)\/\/ #endregion/);
+  if (!m) { console.error('未找到 // #region STORAGE 段'); process.exit(1); }
+  const sandbox = { console: { warn() {}, log() {}, error() {} }, Date, JSON, Object, Array, String, Number, RegExp, Math,
+    STORE_KEY: 'iirose_blacklist_v1', TAG: '[拉黑]', VERSION: '9.9.9', VERSION_CODE: 99 };
+  if (opts && opts.Ext) sandbox.Ext = opts.Ext;
+  if (opts && opts.localStorage) sandbox.localStorage = opts.localStorage;
+  vm.createContext(sandbox);
+  vm.runInContext(m[1] + '\n__exp = { PKG_META, PKG_NAME, storageRead, storageWrite, storageRemove, storageText, storageMode, storageLabel };', sandbox);
+  return sandbox.__exp;
+}
+
+function fakeLocal() {
+  const data = {}; const calls = { get: 0, set: 0, remove: 0 };
+  return {
+    data, calls,
+    getItem(k) { calls.get++; return k in data ? data[k] : null; },
+    setItem(k, v) { calls.set++; data[k] = String(v); },
+    removeItem(k) { calls.remove++; delete data[k]; },
+  };
+}
+function fakeExt(opts) {
+  const rec = { installs: [], settings: {}, removes: [] };
+  const o = opts || {};
+  const instance = {
+    settings(k, v) {
+      if (v === undefined) { if (o.readThrows) throw new Error('read boom'); return k in rec.settings ? rec.settings[k] : undefined; }
+      if (o.writeThrows) throw new Error('write boom');
+      rec.settings[k] = v; return v;
+    },
+    removeSettings(k) { rec.removes.push(k); delete rec.settings[k]; },
+  };
+  return { Ext: { Service: { install(name, meta) { rec.installs.push({ name, meta }); return instance; } } }, rec };
+}
+
 const L = loadCore();
 
 let pass = 0, fail = 0;
@@ -263,6 +300,62 @@ t('发布件与源码一致：仓库根/release 的 iirose-blacklist.js 必须�
   const src = norm('src/iirose-blacklist.js');
   eq(norm('release/iirose-blacklist.js') === src, true, 'release/ 里的发布件落后于 src/（跑 node tools/publish.js）');
   eq(norm('iirose-blacklist.js') === src, true, '仓库根目录的发布件落后于 src/（跑 node tools/publish.js）');
+});
+
+t('官方形态：Ext.Service.install 收到合规的包信息，且存储走 settings、绝不碰 localStorage', () => {
+  const local = fakeLocal();
+  const { Ext, rec } = fakeExt();
+  const S = loadStorage({ Ext, localStorage: local });
+  eq(S.storageMode, 'service');
+  eq(S.storageLabel(), '官方 settings');
+  eq(rec.installs.length, 1, '应恰好登记一次');
+  eq(rec.installs[0].name, S.PKG_NAME);
+  ok(/^[A-Za-z0-9_]+\.[A-Za-z0-9_]+$/.test(S.PKG_NAME), '包名须为 作者名.应用名 且只含英文数字下划线：' + S.PKG_NAME);
+  const m = rec.installs[0].meta;
+  ['name', 'author', 'privacy', 'versionName', 'versionCode', 'description', 'outerLoad', 'device', 'runAt'].forEach((k) => {
+    ok(k in m, '包信息缺字段：' + k);
+  });
+  ok(typeof m.versionCode === 'number' && m.versionCode >= 1, 'versionCode 须为数字');
+  eq(m.runAt, 'allReady');
+  eq(m.outerLoad, '', '无外部引用时必须为空串');
+  ok(m.privacy && m.privacy.length > 10, 'privacy 必须公示（本插件会读消息内容）');
+  // 写读删都走 settings
+  eq(S.storageWrite('k', 'v'), null);
+  eq(rec.settings.k, 'v');
+  eq(S.storageRead('k'), 'v');
+  S.storageRemove('k');
+  eq(rec.removes.indexOf('k') >= 0, true, '删除应走 removeSettings');
+  eq(local.calls.get + local.calls.set + local.calls.remove, 0, '官方形态下不许碰 localStorage');
+});
+
+t('注入形态：没有 Ext.Service 时退回 localStorage，mode 标成 local', () => {
+  const local = fakeLocal();
+  const S = loadStorage({ localStorage: local });
+  eq(S.storageMode, 'local');
+  eq(S.storageWrite('k', 'v'), null);
+  eq(local.data.k, 'v');
+  eq(S.storageRead('k'), 'v');
+  S.storageRemove('k');
+  eq(local.data.k, undefined);
+});
+
+t('官方 settings 回对象时也能吃（storageText 统一成字符串）', () => {
+  const local = fakeLocal();
+  const { Ext } = fakeExt();
+  const S = loadStorage({ Ext, localStorage: local });
+  eq(S.storageText({ a: 1 }), '{"a":1}');
+  eq(S.storageText('x'), 'x');
+  eq(S.storageText(null), null);
+  eq(S.storageText(undefined), null);
+});
+
+t('存储抛异常时不崩：写失败返回错误对象（交给 saveFailed 显示），读失败返回 null', () => {
+  const local = fakeLocal();
+  const w = loadStorage({ Ext: fakeExt({ writeThrows: true }).Ext, localStorage: local });
+  ok(w.storageWrite('k', 'v') instanceof Error, '写失败应返回错误对象');
+  eq(w.storageRead('k'), null);
+  const r = loadStorage({ Ext: fakeExt({ readThrows: true }).Ext, localStorage: local });
+  eq(r.storageRead('k'), null, '读失败应回落 null');
 });
 
 console.log('\n== 结果 ==');

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>官方插件形态验收（假 Ext.Service）</title>
+<style>body{background:#111;color:#ddd;font:13px/1.7 monospace;padding:16px} .ok{color:#68b26d} .bad{color:#ec4141}</style>
+</head>
+<body>
+<div id="out">跑中…</div>
+
+<!-- 先伪造官方运行时：Ext.Service.install 必须被插件调用，且存储必须走 settings 而不是 localStorage -->
+<script>
+  window.__SETTINGS = {};
+  window.__INSTALLS = [];
+  window.Ext = {
+    Service: {
+      install: function (name, meta) {
+        window.__INSTALLS.push({ name: name, meta: meta });
+        return {
+          settings: function (k, v) {
+            if (v === undefined) return Object.prototype.hasOwnProperty.call(window.__SETTINGS, k) ? window.__SETTINGS[k] : undefined;
+            window.__SETTINGS[k] = v; return v;
+          },
+          removeSettings: function (k) { delete window.__SETTINGS[k]; },
+          database: function (k, v) { return this.settings(k, v); },
+          removeDatabase: function (k) { return this.removeSettings(k); },
+        };
+      },
+    },
+  };
+</script>
+<script src="../src/iirose-blacklist.js"></script>
+
+<script>
+(async function () {
+  const lines = [];
+  let fail = 0;
+  const ok = (cond, msg) => { lines.push((cond ? '<span class="ok">ok   </span>' : '<span class="bad">FAIL </span>') + msg); if (!cond) fail++; };
+  const A = window.__IIROSE_BLACKLIST__;
+  await new Promise((r) => setTimeout(r, 300));
+
+  ok(!!A, '插件已加载');
+  ok(window.__INSTALLS.length === 1, 'Ext.Service.install 应被调用一次，实际 ' + window.__INSTALLS.length);
+  const inst = window.__INSTALLS[0] || { name: '', meta: {} };
+  ok(/^[A-Za-z0-9_]+\.[A-Za-z0-9_]+$/.test(inst.name), '包名格式（作者名.应用名）：' + inst.name);
+  ['name', 'author', 'privacy', 'versionName', 'versionCode', 'description', 'outerLoad', 'icon', 'cover', 'poster', 'device', 'runAt'].forEach((k) => {
+    ok(k in inst.meta, '包信息字段存在：' + k);
+  });
+  ok(typeof inst.meta.versionCode === 'number', 'versionCode 是数字：' + inst.meta.versionCode);
+  ok(!!inst.meta.privacy && inst.meta.privacy.length > 10, 'privacy 已公示');
+  ok(A.storage().mode === 'service', '存储形态 = service，实际 ' + A.storage().mode);
+  ok(A.pkg().installed === true, 'pkg().installed 应为 true');
+
+  // 拉黑一个人，看真的写进 settings 而不是 localStorage
+  A.block('official0001', '官方形态测试');
+  await new Promise((r) => setTimeout(r, 400));
+  const viaSettings = window.__SETTINGS['iirose_blacklist_v1'];
+  const viaLocal = localStorage.getItem('iirose_blacklist_v1');
+  ok(!!viaSettings, 'black名单写进了 settings');
+  ok(viaLocal === null, '官方形态下 localStorage 里不该有名单（实际 ' + (viaLocal === null ? '无' : '有') + '）');
+  let parsed = null;
+  try { parsed = JSON.parse(viaSettings); } catch (e) { }
+  ok(parsed && parsed.uids && parsed.uids['official0001'], 'settings 里存的是可解析的名单 JSON');
+  ok(A.isBlocked('official0001'), '拉黑生效');
+  A.unblock('official0001');
+
+  document.getElementById('out').innerHTML = lines.join('<br>') + '<br><br><b>' + (fail ? ('失败 ' + fail + ' 项') : '全部通过') + '</b>';
+  window.__RESULT__ = { total: lines.length, fail: fail };
+})();
+</script>
+</body>
+</html>
