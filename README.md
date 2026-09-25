@@ -46,8 +46,10 @@
 
 ```
 src/      插件源码（单文件 IIFE，即成品）
+loader.js **给朋友的注入入口**：相对自身目录拉主脚本 + 时间戳绕缓存 + 备用域名兜底（改它才需要重新粘地址）
 tests/    子测试：Node 单测（提取 #region CORE / #region STORAGE）+ 浏览器假 socket 联调 harness
           + official-mode.html（官方插件形态：假 Ext.Service，验合规与存储）
+          + loader-test.html（loader 本地路径 6 项）+ loader-cdn.html（loader 走 CDN 实链 = 朋友路径）
 docs/     调研笔记、审查报告
 release/  发布件（推 GitHub / jsdelivr 用）
 tools/    发布件同步脚本（node tools/publish.js，--check 只校验）
@@ -90,12 +92,33 @@ start.bat 本地托管（自定义 JS 注入调试用）
 在 iirose 页面里注入（和你注入点歌插件同一套：终端里 `js` 粘贴地址，`extJs` 支持空格分隔多个）：
 
 ```
+https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/loader.js
+```
+
+**推荐用这一行（loader）**：它每次都用带时间戳的地址去拉主脚本，所以**以后我发新版，你什么都不用做，刷新页面就是最新版** —— 不用重新粘贴、不用改 `?v=` 数字、不用手动刷 CDN。CDN 拉不到时会自动换备用域名（fastly / gcore）再试一次。
+
+直连主脚本（老用法，仍然可用，但每次更新都要手动绕缓存）：
+
+```
 https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
 ```
 
-- 想固定版本不被自动更新：`.../iirose-blacklist@v0.1.13/iirose-blacklist.js`
-- 更新后「还是旧版」：`Ctrl+F5`；或给地址加查询串 `?v=2`（换成新数字即新 URL，CDN 忽略查询串照常返回文件）
-- 注入成功后右下角出现 🚫 悬浮球，控制台打印 `[iirose 拉黑] v0.1.13 已加载`；悬浮球可拖动，点击开面板
+- loader 自身也有浏览器缓存，但它是稳定文件、基本不需要改动；万一要改，我会顺手 purge。
+- 主脚本拉不到时会 console 报 `[拉黑/loader] 加载失败：<地址>` 并依次试备用域名，最后给出可临时直连的地址。
+- 注入成功后右下角出现 🚫 悬浮球，控制台打印 `[iirose 拉黑] vX.Y.Z 已加载`；悬浮球可拖动，点击开面板。
+
+## 怎么更新到最新版
+
+| 你的注入方式 | 更新动作 |
+|---|---|
+| **loader（推荐）** | 什么都不用做，**刷新页面**即最新版（F5；手机下拉刷新/切页也行） |
+| 直连 `iirose-blacklist.js` | ① 把地址里 `?v=` 的数字改大（新数字=新 URL，浏览器必须重新下载，CDN 忽略查询串照常返回最新文件）② 在站点的自定义 JS 里**重新粘贴一次**（地址存在 `extJs` 里，不重粘永远只认旧地址） |
+| 本地调试（`start.bat`） | 直接 `Ctrl+F5`，本地不经 CDN，没有 7 天缓存 |
+| 想固定某个版本 | 用 tag 地址：`.../iirose-blacklist@v0.2.0/iirose-blacklist.js` |
+
+为什么会有"缓存"这回事：浏览器把 jsdelivr 的分支地址缓存 **7 天**（地址一样就不去请求）。loader 用 `?t=时间戳` 让每次 URL 都不同，所以永远拿到新的。
+
+确认更新成功：面板标题显示版本号；或控制台 `__IIROSE_BLACKLIST__.version`；面板自检行还会写明「存储：官方 settings / 本地注入（localStorage）」。
 
 ## 使用
 
@@ -104,7 +127,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
    （`extJs` 支持空格分隔多个地址，可与点歌插件同时注入）
 2. 朋友用：注入 jsdelivr 地址（发布后填）
 3. 界面：右下角悬浮球 🚫 → 面板；右键房间消息头像 → 直接拉黑
-4. 自测：`node tests/core.test.js`（核心逻辑 39 项）、浏览器打开 `tests/harness.html`（联调 43 项）与 `tests/official-mode.html`（官方形态 23 项）
+4. 自测：`node tests/core.test.js`（核心逻辑 39 项）、浏览器打开 `tests/harness.html`（联调 43 项）、`tests/official-mode.html`（官方形态 23 项）、`tests/loader-test.html`（loader 本地 6 项）与 `tests/loader-cdn.html`（loader 走 CDN = 朋友路径）
 5. 面板点不动时的排障：`__IIROSE_BLACKLIST__._diag.hitTest()` 看控件是否被盖住/尺寸归零；`__IIROSE_BLACKLIST__._diag.watchClick()` 装点击探针，再点一下开关，看控制台打出哪几层事件；`setEnabled/setDebug/setRightClick/setKeepHistory/setHideSession` 是不依赖鼠标的备用入口（非布尔入参一律忽略，绝不会误切到会删记录的方向）；`sweep()` 可手动触发一次全扫，`debugSweep()` 逐行报告 DOM 清扫的判断结果
 
 ## 手机（触屏）怎么用
@@ -132,6 +155,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
 
 ## 版本
 
+- loader v1（2026-09-25，独立于插件版本）：新增 `loader.js` 注入入口 —— 相对自身目录取主脚本、`?t=时间戳` 绕开 jsdelivr 分支地址 7 天缓存、失败自动换 fastly/gcore 域名，重复注入不重复拉。配套 `tests/loader-test.html`（本地 6 项）与 `tests/loader-cdn.html`（CDN 实链 4 项）。**用 loader 的用户以后不需要任何更新动作**。
 - v0.2.0（2026-09-25）：**按站长插件规范做合规外壳（双形态）**。新增 `#region STORAGE`：检测 `Ext.Service` 存在就用 `instance.settings` 存取并登记包信息（包名 `Northseacaviar.iiroseBlacklist`、12 项元信息、`privacy` 公示"本地读取消息内容用于过滤、不上报"、`versionCode` 数字递增、`outerLoad` 空串、`runAt: allReady`），不存在（当前注入形态）才退回 localStorage，并在**自检行**显示「存储：官方 settings / 本地注入（localStorage）」。新增 API `storage()` / `pkg()`。测试：核心 39 项（+4 条存储双形态）、联调 43 项（+W43）、新增 `tests/official-mode.html` 23 项（假 Ext.Service，验"官方形态下 localStorage 里不出现名单"）。图片（icon/cover/poster）与跨上下文适配按用户决定暂缓 —— 等站长开放提交通道再补。
 - v0.1.13（2026-09-25）：**修两个真机反馈的 bug**（北海实测报回；修完**真机验收通过**）:
   ① **已拉黑名单显示不出来、点不到「解除」**：面板内容比视口高时（聊天 iframe 矮，实测 1280×420 与 390×340 都触发 —— 见 `maxHeight` 计算），两个名单是唯一可被 flex 压缩的子项，被挤成 0 高（按钮还在 DOM 里，只是被裁掉）。修法：面板本体改为**自身可滚动**（`overflowY:auto`）+ 两个名单 `min-height:46px` 且 `flex-shrink:0` → 内容再高也能滚到、名单永远可读。
