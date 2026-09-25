@@ -51,6 +51,18 @@ release/  发布件（推 GitHub / jsdelivr 用）
 start.bat 本地托管（自定义 JS 注入调试用）
 ```
 
+## 给朋友用（一行地址）
+
+在 iirose 页面里注入（和你注入点歌插件同一套：终端里 `js` 粘贴地址，`extJs` 支持空格分隔多个）：
+
+```
+https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
+```
+
+- 想固定版本不被自动更新：`.../iirose-blacklist@v0.1.8/iirose-blacklist.js`
+- 更新后「还是旧版」：`Ctrl+F5`；或给地址加查询串 `?v=2`（换成新数字即新 URL，CDN 忽略查询串照常返回文件）
+- 注入成功后右下角出现 🚫 悬浮球，控制台打印 `[iirose 拉黑] v0.1.8 已加载`；悬浮球可拖动，点击开面板
+
 ## 使用
 
 1. 本地调试：双击 `start.bat`（起 127.0.0.1:8770），站点内 console → `js -s` 开启 → `js` 粘贴
