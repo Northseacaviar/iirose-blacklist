@@ -166,15 +166,22 @@ async function run() {
     eq(innermost((e) => /^已拉黑 \(\d+\)$/.test(e.textContent || '')).textContent, '已拉黑 (3)', '名单条数不对：' + p.textContent.slice(0, 200));
     ok(p.textContent.indexOf(ID.OLD) > 0 || p.textContent.indexOf(ID.BLOCK) > 0, '名单没显示 uid');
   });
-  await t('W17 面板点「解除」后名单减少、私聊会话项恢复显示', async () => {
+  await t('W17 面板点「解除」：被点的那条真的解除，私聊会话项随之恢复', async () => {
     const p = panel();
     const btn = innermost((e) => e.tagName === 'BUTTON' && e.textContent === '解除');
     ok(btn, '没有解除按钮');
+    // 从该行文本里取出 uid（uid 可能含下划线，所以按"出现在名单里"匹配）
+    const rowText = btn.parentElement.textContent;
+    const uid = Object.keys(A.store.uids).find((u) => rowText.indexOf(u) >= 0);
+    ok(uid, '没从行里认出 uid：' + rowText);
+    const before = Object.keys(A.store.uids).length;
     btn.click();
-    await sleep(200);
-    eq(A.isBlocked(ID.PMOLD), false, '解除的不是最早那条（应按时间倒序取第一条）');
-    await sleep(200);
-    eq(document.querySelector('[ip="' + ID.PMOLD + '"]').style.display, '');
+    await sleep(250);
+    eq(A.isBlocked(uid), false, '点了解除但 ' + uid + ' 还在名单');
+    eq(Object.keys(A.store.uids).length, before - 1, '名单条数没减');
+    await sleep(250);
+    const sess = document.querySelector('[ip="' + uid + '"]');
+    if (sess) eq(sess.style.display, '', '被解除的私聊会话项没恢复显示');
   });
   await t('W18 面板按名字拉黑', async () => {
     const p = panel();
@@ -194,7 +201,7 @@ async function run() {
     const av = node.querySelector('.msgavatar');
     av.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 120 }));
     await sleep(60);
-    const menuBox = Array.from(document.querySelectorAll('div')).filter((e) => e.style.position === 'fixed' && /^拉黑 /.test(e.textContent || ''));
+    const menuBox = Array.from(document.querySelectorAll('div')).filter((e) => e.parentElement === document.body && e.style.position === 'fixed' && /^(拉黑 |解除拉黑 )/.test(e.textContent || ''));
     const item = menuBox.length ? menuBox[0].firstElementChild : null;
     ok(item, '右键菜单没出现');
     item.click();
@@ -219,6 +226,62 @@ async function run() {
     await sleep(500);
     ok(h.contains(n), '关闭开关后仍被删');
     A.store.enabled = true;
+  });
+
+  await t('W22 收包过滤被站点重建后会自己挂回来（模拟重连）', async () => {
+    // 站点重连时会把 _onmessage 换成新函数，标记随之消失
+    window.socket._onmessage = function (d) { window.__RECV.push(d); };
+    eq(A.hooked, false, 'hooked 应实时反映"没挂上"');
+    await sleep(6000);                                   // 5 秒自检周期
+    eq(A.hooked, true, '自检应把过滤重新挂回新 socket');
+    window.__RECV.length = 0;
+    const fresh = '""1700000201>' + ID.KEEP + '>新来的>http://av/9.jpg>hi>339f88>>339f88>3>http://bg/9.png>777'
+      + '<1700000102>' + ID.BLOCK + '>乙>http://av/2.jpg>x>339f88>>339f88>3>http://bg/2.png>444';
+    window.socket._onmessage(fresh);
+    eq(window.__RECV.length, 1, '未拉黑者的帧应放行');
+    ok(window.__RECV[0].indexOf(ID.BLOCK) < 0, '重挂后被拉黑者记录仍应被剔除');
+    ok(window.__RECV[0].indexOf(ID.KEEP) > 0, '未拉黑者记录应保留');
+  });
+
+  await t('W23 重复注入被挡（第二份不会半失效）', async () => {
+    const before = window.__IIROSE_BLACKLIST__;
+    const fabsBefore = Array.from(document.querySelectorAll('div')).filter((d) => d.textContent === '🚫').length;
+    A.block(ID.PMOLD, '私聊对象');
+    const s = document.createElement('script');
+    s.src = '../src/iirose-blacklist.js?dup=' + Date.now();
+    document.body.appendChild(s);
+    await sleep(500);
+    eq(window.__IIROSE_BLACKLIST__, before, '第二份不该顶掉第一份的 API');
+    eq(A.isBlocked(ID.PMOLD), true, '名单不该被第二份重置');
+    const fabsAfter = Array.from(document.querySelectorAll('div')).filter((d) => d.textContent === '🚫').length;
+    eq(fabsAfter, fabsBefore, '不该多出一个悬浮球');
+  });
+
+  await t('W24 面板可关掉右键拉黑菜单', async () => {
+    const p = panel();
+    ok(p, '面板没打开');
+    const boxes = Array.from(p.querySelectorAll('input[type=checkbox]'));
+    ok(boxes.length >= 3, '应有 启用屏蔽/右键菜单/调试 三个勾选框，实际 ' + boxes.length);
+    const rcBox = boxes.find((b) => /右键/.test((b.parentElement && b.parentElement.textContent) || ''));
+    ok(rcBox, '找不到"右键头像弹拉黑菜单"勾选框');
+    eq(rcBox.checked, true);
+    rcBox.checked = false; rcBox.dispatchEvent(new Event('change', { bubbles: true }));
+    await sleep(80);
+    eq(A.store.conf.rightClick, false);
+    // 关掉后再右键头像，不该出现菜单
+    const h = document.getElementById('msgHolder');
+    const node = document.createElement('div');
+    node.className = 'msg'; node.dataset.id = ID.OTHER + '_1700077777';
+    node.innerHTML = '<div class="msgavatar" data-uid="' + ID.OTHER + '"></div>x';
+    h.appendChild(node);
+    node.querySelector('.msgavatar').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 200 }));
+    await sleep(80);
+    // 精确识别"菜单容器"：body 直接子节点、fixed、文字就是一条菜单项（面板自身含"已拉黑 xxx"会被误判）
+    const isMenu = (e) => e.parentElement === document.body && e.style.position === 'fixed'
+      && /^(拉黑 |解除拉黑 )/.test(e.textContent || '');
+    const menu = Array.from(document.querySelectorAll('div')).filter(isMenu);
+    eq(menu.length, 0, '关掉开关后仍弹了菜单：' + menu.map((m) => m.textContent).join('|'));
+    rcBox.checked = true; rcBox.dispatchEvent(new Event('change', { bubbles: true }));
   });
 
   const fail = results.filter((r) => !r.ok);
