@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.2.2';
-  const VERSION_CODE = 17;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.2.4';
+  const VERSION_CODE = 19;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -109,7 +109,6 @@
       counters: { room: 0, priv: 0, danmaku: 0, dom: 0, abnormal: 0, err: 0 },
       conf: {
         confVersion: CONF_VERSION,   // 见顶部说明：用来区分"用户显式选择"与"上一版的默认值"
-        rightClick: true,
         debug: false,
         panel: null,          // 用户拖到的面板位置（null=自动摆放）
         // 拉黑时遍历聊天记录，清掉被拉黑者的历史（点播卡片 + 消息）——2026-09-25 北海重新界定需求后的默认行为
@@ -141,7 +140,6 @@
       // 老落盘里没有 confVersion —— 那时期的 keepHistory=true 是**上一版的默认值**，不是用户选择。
       // 直接沿用会把新默认（拉黑即清历史）顶掉，症状恰好是"卡片清掉、文字留着"。所以没有版本号就迁到新默认并回写。
       const legacy = typeof raw.conf.confVersion !== 'number';
-      if (typeof raw.conf.rightClick === 'boolean') s.conf.rightClick = raw.conf.rightClick;
       if (typeof raw.conf.debug === 'boolean') s.conf.debug = raw.conf.debug;
       if (legacy) {
         s.conf.keepHistory = false;      // 新默认：拉黑时清掉他的历史消息
@@ -977,13 +975,6 @@
     swRow.appendChild(enableToggle); swRow.appendChild(debugToggle);
     panel.appendChild(swRow);
 
-    // 右键菜单开关（conf.rightClick 之前只读、没法改）
-    const rcToggle = toggleRow('rightClick', '右键头像弹拉黑菜单', store.conf.rightClick !== false, (on) => {
-      store.conf.rightClick = on; saveStore();
-      setStatus(on ? '右键房间消息头像可拉黑' : '右键菜单已关闭（面板里仍可拉黑）', '#999');
-    });
-    panel.appendChild(rcToggle);
-
     // 历史处理（2026-09-25 需求重新界定：拉黑时遍历聊天记录，清掉他的点歌卡片 + 历史消息）
     const keepToggle = toggleRow('keepHistory', '拉黑时保留他的历史消息', store.conf.keepHistory !== false, (on) => {
       store.conf.keepHistory = on; saveStore();
@@ -1022,7 +1013,7 @@
     addRow.appendChild(input); addRow.appendChild(addBtn);
     panel.appendChild(addRow);
 
-    const status = el('div', { padding: '0 12px 8px', color: '#999', fontSize: '11px', minHeight: '15px' }, '右键房间消息头像也能拉黑');
+    const status = el('div', { padding: '0 12px 8px', color: '#999', fontSize: '11px', minHeight: '15px' }, '拉黑入口：下面「见过的人」里点拉黑，或粘 UID 点拉黑');
     panel.appendChild(status);
     function setStatus(t, color) { status.textContent = t; status.style.color = color || '#999'; }
 
@@ -1145,7 +1136,6 @@
       refreshBlacklist(); refreshSeen(); refreshStats();
       enableToggle.__set(store.enabled);
       debugToggle.__set(!!store.conf.debug);
-      rcToggle.__set(store.conf.rightClick !== false);
       keepToggle.__set(store.conf.keepHistory !== false);
       cardToggle.__set(store.conf.clearCards !== false);
       sessToggle.__set(store.conf.hideSession !== false);
@@ -1281,78 +1271,6 @@
 
   function statusMsg(t, c) { if (ui) ui.setStatus(t, c); else log(t); }
 
-  /* ---------------- 右键头像拉黑 ---------------- */
-  function startContextMenu() {
-    let menu = null, lastTouchAt = 0;
-    function closeMenu() { if (menu && menu.parentNode) menu.parentNode.removeChild(menu); menu = null; }
-    // 触屏兼容注意事项（v0.1.10）：抬手时浏览器会补一串"兼容鼠标"事件，
-    // 那串里的 mousedown 会把刚长按弹出来的菜单立刻关掉（用户还没点到菜单项就没了）。
-    // 记下最近一次触屏时刻，紧跟其后的 mousedown 不当作"点了别处"。
-    document.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch' || e.pointerType === 'pen') lastTouchAt = Date.now(); }, true);
-    document.addEventListener('pointerup', (e) => { if (e.pointerType === 'touch' || e.pointerType === 'pen') lastTouchAt = Date.now(); }, true);
-    document.addEventListener('mousedown', (e) => {
-      if (Date.now() - lastTouchAt < 350) return;              // 触屏那串兼容事件，忽略
-      if (menu && !menu.contains(e.target)) closeMenu();
-    }, true);
-    // 手机适配（v0.1.9）：触屏没有右键 —— 长按头像约 0.55 秒等同一次右键（合成 contextmenu 走同一条路）
-    let lpTimer = null, lpMoved = false, lpXY = null;
-    document.addEventListener('pointerdown', (e) => {
-      if (e.pointerType === 'mouse' || !store.conf.rightClick) return;
-      const t = e.target;
-      if (!t || !t.closest) return;
-      const host = t.closest('.msgavatar,[data-uid],[ip]');
-      if (!host) return;
-      lpMoved = false; lpXY = [e.clientX, e.clientY];
-      clearTimeout(lpTimer);
-      lpTimer = setTimeout(() => {
-        if (lpMoved) return;
-        try {
-          host.dispatchEvent(new MouseEvent('contextmenu', {
-            bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY,
-          }));
-        } catch (_) { }
-      }, 550);
-    }, true);
-    document.addEventListener('pointermove', (e) => {
-      if (!lpXY) return;
-      if (Math.abs(e.clientX - lpXY[0]) + Math.abs(e.clientY - lpXY[1]) > 8) lpMoved = true;
-    }, true);
-    document.addEventListener('pointerup', () => { clearTimeout(lpTimer); lpXY = null; }, true);
-    document.addEventListener('pointercancel', () => { clearTimeout(lpTimer); lpXY = null; }, true);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); }, true);
-
-    document.addEventListener('contextmenu', (e) => {
-      if (!store.conf.rightClick) return;
-      const t = e.target;
-      if (!t || !t.closest) return;
-      const host = t.closest('.msgavatar,[data-uid],[ip]');
-      if (!host) return;
-      const uid = (host.dataset && host.dataset.uid) || host.getAttribute('ip')
-        || (host.closest('.msg') && host.closest('.msg').dataset ? String(host.closest('.msg').dataset.id || '').split('_')[0] : null);
-      if (!looksLikeUid(uid)) return;
-
-      e.preventDefault(); e.stopPropagation();
-      closeMenu();
-      const name = (store.seen[uid] || {}).name || (store.uids[uid] || {}).name || '';
-      const blocked = isBlocked(uid);
-      menu = el('div', {
-        position: 'fixed', left: Math.min(e.clientX, window.innerWidth - 150) + 'px',
-        top: Math.min(e.clientY, window.innerHeight - 50) + 'px', background: '#26272f',
-        border: '1px solid #444', borderRadius: '6px', boxShadow: '0 4px 16px rgba(0,0,0,.6)',
-        zIndex: Z, overflow: 'hidden',
-      });
-      menu.id = '__bl_menu__';
-      const item = el('div', {
-        padding: '8px 14px', cursor: 'pointer', whiteSpace: 'nowrap',
-        color: blocked ? '#68b26d' : '#ffb4ae',
-      }, (blocked ? '解除拉黑 ' : '拉黑 ') + (name || uid));
-      item.onmouseenter = () => { item.style.background = '#33353f'; };
-      item.onmouseleave = () => { item.style.background = 'transparent'; };
-      onPress(item, () => { if (blocked) unblock(uid); else block(uid, name); closeMenu(); });
-      menu.appendChild(item);
-      document.body.appendChild(menu);
-    }, true);
-  }
 
   /* ==========================================================================
    * 启动
@@ -1369,7 +1287,6 @@
     loadStore();
     waitSocket();
     startDomGuard();
-    startContextMenu();
     buildUi();
     // 卸载窗口兜底：拉黑后 200ms 内刷新/切房，节流中的那次改动否则会丢
     try { window.addEventListener('pagehide', flushSave); window.addEventListener('beforeunload', flushSave); } catch (_) { }
@@ -1388,7 +1305,6 @@
       // 非布尔入参一律忽略并返回当前值：绝不因误传（0/undefined/'yes'）切到会删记录/关掉屏蔽的方向
       setEnabled: function (v) { if (typeof v !== 'boolean') return store.enabled; store.enabled = v; saveStore(); if (ui) ui.refreshAll(); return v; },
       setDebug: function (v) { if (typeof v !== 'boolean') return !!store.conf.debug; store.conf.debug = v; saveStore(); if (ui) ui.refreshAll(); return v; },
-      setRightClick: function (v) { if (typeof v !== 'boolean') return store.conf.rightClick !== false; store.conf.rightClick = v; saveStore(); if (ui) ui.refreshAll(); return v; },
       setKeepHistory: function (v) { if (typeof v !== 'boolean') return store.conf.keepHistory !== false; store.conf.keepHistory = v; saveStore(); if (ui) ui.refreshAll(); if (!v) sweepAll(); return v; },
       setClearCards: function (v) { if (typeof v !== 'boolean') return store.conf.clearCards !== false; store.conf.clearCards = v; saveStore(); if (ui) ui.refreshAll(); if (v) sweepAll(); return v; },
       setHideSession: function (v) { if (typeof v !== 'boolean') return store.conf.hideSession !== false; store.conf.hideSession = v; saveStore(); if (ui) ui.refreshAll(); hideSessionNodes(); return v; },

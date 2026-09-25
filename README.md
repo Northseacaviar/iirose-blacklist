@@ -144,8 +144,8 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
    `http://127.0.0.1:8770/src/iirose-blacklist.js`
    （`extJs` 支持空格分隔多个地址，可与点歌插件同时注入）
 2. 朋友用：注入 loader 那一行（见上面「给朋友用」）
-3. 界面：右下角悬浮球 🚫 → 面板；右键房间消息头像 → 直接拉黑
-4. 自测：`node tests/core.test.js`（核心逻辑 41 项）、浏览器打开 `tests/harness.html`（联调 47 项）、`tests/official-mode.html`（官方形态 23 项）、`tests/migration.html`（老配置迁移 7 项）、`tests/loader-test.html`（loader 本地 6 项）与 `tests/loader-cdn.html`（loader 走 CDN = 朋友路径）
+3. 界面：右下角悬浮球 🚫 → 面板（拉黑/解除拉黑全在这里）
+4. 自测：`node tests/core.test.js`（核心逻辑 41 项）、浏览器打开 `tests/harness.html`（联调 49 项）、`tests/official-mode.html`（官方形态 23 项）、`tests/migration.html`（老配置迁移 7 项）、`tests/loader-test.html`（loader 本地 6 项）与 `tests/loader-cdn.html`（loader 走 CDN = 朋友路径）
    - 两个 loader 测试页断言"拿到的版本 = 当前发布件版本"，期望值来自 `tests/expected-version.js`（由 `tools/publish.js` 生成，**别手改**，否则每次发版都得改测试）。
    - 注意：`official-mode.html` 里有一条断言是"官方形态下 localStorage 里不该有名单"。若在同一浏览器配置里先跑过 `harness.html`（它会往 localStorage 写名单），这条会假失败 —— 先 `localStorage.clear()` 再跑，或换无痕窗口。
 5. 面板点不动时的排障：`__IIROSE_BLACKLIST__._diag.hitTest()` 看控件是否被盖住/尺寸归零；`__IIROSE_BLACKLIST__._diag.watchClick()` 装点击探针，再点一下开关，看控制台打出哪几层事件；`setEnabled/setDebug/setRightClick/setKeepHistory/setClearCards/setHideSession` 是不依赖鼠标的备用入口（非布尔入参一律忽略，绝不会误切到会删记录的方向）；`sweep()` 可手动触发一次全扫，`debugSweep()` 逐行报告 DOM 清扫的判断结果（含 `card` 字段 = 该行是否算点播卡片行）
@@ -161,7 +161,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
    ```
 
 2. **悬浮球**：默认落在视口内（窄屏自动改大小 52px 并靠右下）；可拖动，拖过的位置会记住；视口变化后如果它被挤出屏幕，会自己拉回来。
-3. **拉黑**：长按某人头像约 0.55 秒 = 右键菜单（触屏没有右键）；也可以点悬浮球开面板，在「见过的人」里点拉黑。拉黑会**静默清掉 TA 的历史消息与点播卡片**（默认口径）。面板里的开关（启用屏蔽 / 调试日志 / 右键菜单 / 拉黑时保留他的历史消息 / 清除历史点播卡片 / 隐藏私聊会话条目）在触屏上点一次即生效；若不想清历史，把「拉黑时保留他的历史消息」打开。
+3. **拉黑**：点悬浮球开面板 —— 贴 uid 点「拉黑」，或在「最近出现」里点某人的「拉黑」。**没有右键/长按菜单**（v0.2.4 起移除：那个标签在触屏上关不掉、还吃掉长按复制，得不偿失）。拉黑会**静默清掉 TA 的历史消息与点播卡片**（默认口径）。面板里的开关（启用屏蔽 / 调试日志 / 拉黑时保留他的历史消息 / 清除历史点播卡片 / 隐藏私聊会话条目）在触屏上点一次即生效；若不想清历史，把「拉黑时保留他的历史消息」打开。
 4. **排查手机端「不显示悬浮窗」**：注入 `mobile-probe.js`（同目录），它会在页面顶部挂一条红色横幅，直接写出：脚本跑在哪个上下文、视口多大、插件有没有落地、悬浮球在哪/被谁盖住、有没有脚本报错、`extJs` 里有没有地址。
    ```
    https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/mobile-probe.js
@@ -181,21 +181,23 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 本项目的 token 与花费由脚本直查本机 Hermes 会话库生成（只读），明细在 [`docs/成本账.md`](docs/成本账.md)。
 
 <!-- COST:BEGIN 由 tools/token-report.py --readme 生成，别手改 -->
-- 截至 2026-09-25 22:34（北京时间）：估算花费 **$1.0725**（≈8 元人民币）· 消息 431 · 工具调用 211
-- 结构：主开发会话 $0.94 ／ 子 agent 独立审查 $0.09 ／ 部分相关折算 $0.04（明细见 [`docs/成本账.md`](docs/成本账.md)）
+- 截至 2026-09-25 22:53（北京时间）：估算花费 **$1.1323**（≈8 元人民币）· 消息 281 · 工具调用 145
+- 结构：主开发会话 $1.00 ／ 子 agent 独立审查 $0.09 ／ 部分相关折算 $0.04（明细见 [`docs/成本账.md`](docs/成本账.md)）
 - 口径：`estimated_cost_usd` 是**估算不是账单**；`reasoning_tokens` 通常已含在输出口径里；缓存读占 ~98%，所以「总 token 近亿」不等于贵。
 - 复现：`python tools/token-report.py`（屏幕）· `--doc docs/成本账.md`（重写成本账）· `--readme README.md`（刷新本段）
 <!-- COST:END -->
 
 ## 版本
 
-**发布 tag**：`v0.2.0`（合规外壳）→ `v0.2.1`（loader v1）→ `v0.2.2`（loader v1.1 + vibecoding 署名）→ `v0.2.3`（loader v1.2 降级链 + 成本信息进文档）→ `v0.2.4`（插件 v0.2.1：拉黑即清历史 + 点播卡片）→ `v0.2.5`（插件 v0.2.2：老配置迁移，修"卡片清了、文字还在"）。
+**发布 tag**：`v0.2.0`（合规外壳）→ `v0.2.1`（loader v1）→ `v0.2.2`（loader v1.1 + vibecoding 署名）→ `v0.2.3`（loader v1.2 降级链 + 成本信息进文档）→ `v0.2.4`（插件 v0.2.1：拉黑即清历史 + 点播卡片）→ `v0.2.5`（插件 v0.2.2：老配置迁移，修"卡片清了、文字还在"）→ `v0.2.6`（插件 v0.2.4：拆掉右键/长按拉黑菜单，拉黑只走面板）。
 **只有插件本体（`src/`）改动才升 `VERSION` 与 `VERSION_CODE`**（官方规范要求 versionCode 每次发布 +1）；loader 与文档改动不动插件版本。
 
 - 插件 v0.2.2（2026-09-25，真机复测后补）：**修"点歌卡片清了、文字消息还在"**。日志显示 v0.2.1 已生效（卡片被清），但文字照留 —— 根因是**老落盘里的 `conf.keepHistory: true` 是上一版的默认值**，被当成"用户的显式选择"沿用，把新默认顶掉了。
   - 修法：引入 `confVersion`（`CONF_VERSION = 2`）。读盘时若 `conf` 里**没有** `confVersion`（= v0.2.1 及以前的落盘），就把 `keepHistory`/`clearCards` 迁到新默认并**回写落盘**（同时打一行控制台日志 + 立刻按新口径清扫一遍）；已经有 `confVersion` 的落盘则完全尊重用户选择，不再迁移。这样"新默认"和"用户显式改过"从此可分。
   - 顺带修测试基建：`tools/publish.js` 现在还会生成 `tests/expected-version.js`（期望版本号），两个 loader 测试页用它断言版本 —— 之前版本号手写在测试里，发版必漏改（本次就漏了，`loader-test` 红了一格）。
   - 新增测试页 `tests/migration.html`（预置老落盘 → 加载插件 → 断言已迁移 + 已回写 + 不弄丢名单/计数，7 项）。**该页踩到一个真实时序坑并写进注释**：插件读盘发生在初始化流程里，早断言会读到"还没读盘"的默认 store（默认值与迁移结果恰好都是 `keepHistory=false`，会**假通过**），所以断言前必须等到落盘记录真的出现在内存里。
+- v0.2.4（2026-09-25，真机反馈驱动）：**拆掉右键/长按拉黑菜单**，拉黑只走面板。起因：手机端私聊里长按消息会弹出拉黑标签，那个标签关不掉、用户也点不掉它，还把"长按复制"吃掉。先试过收窄（只认房间头像、点别处关闭、8 秒自动收），用户明确"不行就直接取消这个功能，仅限插件面板拉黑"，于是整块删除：`startContextMenu()` 整个函数、`conf.rightClick`、面板那行开关、API `setRightClick` 全部移除（不留死配置）；面板底部提示改成拉黑入口说明。
+  - 回归：核心 41/41、联调 49/49（W19 改为"右键/长按都不再弹菜单 + 面板 UID 入口仍能拉黑"、W24 改为 5 行开关且确认无 rightClick 行、新增 W48/W49 覆盖"长按房间头像/私聊文字/会话项都不弹，且不 preventDefault"）、官方形态 23/23、迁移页 7/7、loader 本地 6/6。
   - 回归：核心 41/41（新增配置迁移 6 项断言 + 期望版本文件一致性）、联调 47/47、官方形态 23/23、迁移页 7/7、loader 本地 6/6。
 
 - 插件 v0.2.1（2026-09-25，需求重新界定 + 真机反馈）：**每次拉黑都遍历聊天记录，清掉被拉黑者的历史消息与点播卡片**。
