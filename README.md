@@ -55,9 +55,9 @@ loader.js **给朋友的注入入口**：相对自身目录拉主脚本 + 时间
 tests/    子测试：Node 单测（提取 #region CORE / #region STORAGE）+ 浏览器假 socket 联调 harness
           + official-mode.html（官方插件形态：假 Ext.Service，验合规与存储）
           + loader-test.html（loader 本地路径 6 项）+ loader-cdn.html（loader 走 CDN 实链 = 朋友路径）
-docs/     调研笔记、审查报告
+docs/     调研笔记、审查报告、成本账（docs/成本账.md = token 与估算花费）
 release/  发布件（推 GitHub / jsdelivr 用）
-tools/    发布件同步脚本（node tools/publish.js，--check 只校验）
+tools/    publish.js（发布件同步，--check 只校验）、token-report.py（从 Hermes state.db 只读统计本项目用量）
 start.bat 本地托管（自定义 JS 注入调试用）
 ```
 
