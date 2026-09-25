@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.1.9';
+  const VERSION = '0.1.10';
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -550,15 +550,26 @@
   // 唯独原生复选框的默认动作被取消 → 有方框但点不动）。默认动作被取消挡不住处理器触发，所以处理器照用；
   // 但为了将来站点改成 stopPropagation（那时连处理器都不触发）也不失效，同时挂 mouseup 这条路：
   // 按下并在同一元素上抬起就触发，用"本次手势"标志位保证 mouseup 与配对 click 不会翻两次。
+  // 触屏去重（v0.1.10，真机复现后加的）：
+  // 手机上一次点按会同时产生 pointerdown/up **和**"兼容鼠标" mousedown/up/click，
+  // 两条路各触发一次处理器 → 开关被连翻两下 → 现象就是"看得见、点不动"。
+  // 兼容鼠标事件紧跟指针事件（几毫秒内），所以用 80ms 窗口把这条重复线掐掉；
+  // 这个窗口短到不会影响鼠标用户/测试夹具的连点（它们只发 mouse 事件，本来就没有指针事件）。
+  const POINTER_MOUSE_GAP = 80;
   function onPress(node, fn) {
-    let pressed = false, firedByGesture = false;
+    let pressed = false, firedByGesture = false, lastPointerAt = 0;
     const down = () => { pressed = true; firedByGesture = false; };
     const up = () => { if (pressed) { fn(); firedByGesture = true; } pressed = false; };
-    node.addEventListener('mousedown', down);
-    node.addEventListener('mouseup', up);
-    node.addEventListener('pointerdown', down);          // 站点若只在指针事件体系里连通，鼠标事件可能被吞
-    node.addEventListener('pointerup', up);
-    node.addEventListener('click', () => { if (firedByGesture) { firedByGesture = false; return; } fn(); });
+    const fromCompatMouse = () => (Date.now() - lastPointerAt) < POINTER_MOUSE_GAP;
+    node.addEventListener('pointerdown', () => { lastPointerAt = Date.now(); down(); });
+    node.addEventListener('pointerup', () => { lastPointerAt = Date.now(); up(); });
+    node.addEventListener('mousedown', () => { if (fromCompatMouse()) return; down(); });
+    node.addEventListener('mouseup', () => { if (fromCompatMouse()) return; up(); });
+    node.addEventListener('click', () => {
+      if (fromCompatMouse()) return;                     // 触屏那条重复线
+      if (firedByGesture) { firedByGesture = false; return; }
+      fn();
+    });
     document.addEventListener('mouseup', () => { pressed = false; });   // 冒泡阶段，晚于元素自身
     return node;
   }
@@ -583,7 +594,8 @@
     } catch (_) { }
   }
   function installGestureProbes(panel) {
-    const evs = ['mousedown', 'mouseup', 'click', 'pointerdown', 'pointerup', 'contextmenu'];
+    const evs = ['mousedown', 'mouseup', 'click', 'pointerdown', 'pointerup', 'pointercancel',
+                 'touchstart', 'touchend', 'contextmenu'];
     const bind = (lvl, node, capture) => {
       evs.forEach((ev) => node.addEventListener(ev, (e) => noteGesture(lvl, ev, e), capture));
     };
@@ -717,7 +729,14 @@
       label.style.setProperty('color', on ? '#eee' : '#888', 'important');
     }
     paint();
+    let lastFire = 0, lastHow = '', touchGesture = false;
+    // 只有触屏手势才需要跨通道去重：长按时站点先给 contextmenu、抬手再给一次 pointerup，
+    // 两次都算就是"点了没反应"。鼠标/测试夹具是各自独立的点击，绝不能互相压制。
+    row.addEventListener('pointerdown', (e) => { touchGesture = (e.pointerType === 'touch' || e.pointerType === 'pen'); });
     const fire = (how) => {
+      const t = Date.now();
+      if (touchGesture && how !== lastHow && (t - lastFire) < 700) return;
+      lastFire = t; lastHow = how;
       on = !on; paint(); onChange(on);
       noteGesture('action', '切换', { target: row, clientX: 0, clientY: 0 }, (row.dataset.blKey || '') + '=' + on + '(' + how + ')');
     };
@@ -1102,9 +1121,17 @@
 
   /* ---------------- 右键头像拉黑 ---------------- */
   function startContextMenu() {
-    let menu = null;
+    let menu = null, lastTouchAt = 0;
     function closeMenu() { if (menu && menu.parentNode) menu.parentNode.removeChild(menu); menu = null; }
-    document.addEventListener('mousedown', (e) => { if (menu && !menu.contains(e.target)) closeMenu(); }, true);
+    // 触屏兼容注意事项（v0.1.10）：抬手时浏览器会补一串"兼容鼠标"事件，
+    // 那串里的 mousedown 会把刚长按弹出来的菜单立刻关掉（用户还没点到菜单项就没了）。
+    // 记下最近一次触屏时刻，紧跟其后的 mousedown 不当作"点了别处"。
+    document.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch' || e.pointerType === 'pen') lastTouchAt = Date.now(); }, true);
+    document.addEventListener('pointerup', (e) => { if (e.pointerType === 'touch' || e.pointerType === 'pen') lastTouchAt = Date.now(); }, true);
+    document.addEventListener('mousedown', (e) => {
+      if (Date.now() - lastTouchAt < 350) return;              // 触屏那串兼容事件，忽略
+      if (menu && !menu.contains(e.target)) closeMenu();
+    }, true);
     // 手机适配（v0.1.9）：触屏没有右键 —— 长按头像约 0.55 秒等同一次右键（合成 contextmenu 走同一条路）
     let lpTimer = null, lpMoved = false, lpXY = null;
     document.addEventListener('pointerdown', (e) => {
