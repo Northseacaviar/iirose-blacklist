@@ -40,7 +40,7 @@
   - 其余（`%` 快照、`~`、`&1{...}` 媒体事件等）原样透传
 - 命中黑名单的记录整条剔除；剔除后帧为空则整帧丢弃 → 客户端根本收不到
 
-兜底（历史消息在拉黑前已渲染、或私聊窗口重开时用 HTTP 拉历史）：DOM 清扫 + MutationObserver，参照 iiroseForge `enableBlacklist()` 的 `.msgholderBox` / `.msg` / `dataset.id = uid_消息id` 结构。
+兜底：DOM 清扫 + MutationObserver，参照 iiroseForge `enableBlacklist()` 的 `.msgholderBox` / `.msg` / `dataset.id = uid_消息id` 结构。**v0.1.11 起它默认只用来隐藏私聊会话条目** —— 已渲染的历史消息不再被删（`keepHistory` 默认开）；关掉该开关才恢复“拉黑瞬间清掉旧消息”的旧行为。uid 优先取头像上的 `data-uid`，`data-id` 只作兜底（它含下划线时会切出假 uid，审查 2026-09-25 实测）。
 
 ## 目录
 
@@ -49,8 +49,19 @@ src/      插件源码（单文件 IIFE，即成品）
 tests/    子测试：Node 单测（提取 #region CORE）+ 浏览器假 socket 联调 harness
 docs/     调研笔记、审查报告
 release/  发布件（推 GitHub / jsdelivr 用）
+tools/    发布件同步脚本（node tools/publish.js，--check 只校验）
 start.bat 本地托管（自定义 JS 注入调试用）
 ```
+
+## 发布（改完代码怎么做）
+
+1. `node tools/publish.js` —— 把 `src/iirose-blacklist.js` 同步到 `release/` 与仓库根目录
+   （jsdelivr 默认地址取的是仓库根那个文件；以前靠手工复制，忘一次就是"测试全过、朋友拿到旧版"）
+2. `node tests/core.test.js` + 浏览器开 `tests/harness.html`，两边全绿（核心单测里已加"发布件必须等于源码"这条，会兜住上面第 1 步忘做）
+3. `git add -A && git commit && git push`，然后 `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`
+4. 刷 jsdelivr 缓存（分支地址有小时级缓存，tag 地址不用刷）：
+   `curl "https://purge.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklist.js"`
+5. 复核：拉默认地址与 `@vX.Y.Z` 地址，比对 md5 与 `VERSION` 常量
 
 ## 给朋友用（一行地址）
 
@@ -71,8 +82,8 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
    （`extJs` 支持空格分隔多个地址，可与点歌插件同时注入）
 2. 朋友用：注入 jsdelivr 地址（发布后填）
 3. 界面：右下角悬浮球 🚫 → 面板；右键房间消息头像 → 直接拉黑
-4. 自测：`node tests/core.test.js`（核心逻辑 34 项）、浏览器打开 `tests/harness.html`（联调 35 项，含假 socket 重连自愈、"站点式 click preventDefault"下控件仍可用）
-5. 面板点不动时的排障：`__IIROSE_BLACKLIST__._diag.hitTest()` 看控件是否被盖住/尺寸归零；`__IIROSE_BLACKLIST__._diag.watchClick()` 装点击探针，再点一下开关，看控制台打出哪几层事件；`setEnabled/setDebug/setRightClick` 是不依赖鼠标的备用入口
+4. 自测：`node tests/core.test.js`（核心逻辑 35 项）、浏览器打开 `tests/harness.html`（联调 40 项，含假 socket 重连自愈、"站点式 click preventDefault"下控件仍可用）
+5. 面板点不动时的排障：`__IIROSE_BLACKLIST__._diag.hitTest()` 看控件是否被盖住/尺寸归零；`__IIROSE_BLACKLIST__._diag.watchClick()` 装点击探针，再点一下开关，看控制台打出哪几层事件；`setEnabled/setDebug/setRightClick/setKeepHistory/setHideSession` 是不依赖鼠标的备用入口（非布尔入参一律忽略，绝不会误切到会删记录的方向）；`sweep()` 可手动触发一次全扫，`debugSweep()` 逐行报告 DOM 清扫的判断结果
 
 ## 手机（触屏）怎么用
 
@@ -99,6 +110,13 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
 
 ## 版本
 
+- v0.1.12（2026-09-25）：**按独立审查意见加固**（报告与逐条复核见 `docs/审查报告-2026-09-25-v0111.md`）。修 4 处：
+  ① 解除拉黑的文案与新默认行为矛盾（原写"旧消息已删，不会恢复"，默认已不删）→ 按当前模式分两种说法；
+  ② API `setEnabled/setDebug/setRightClick/setKeepHistory/setHideSession` 传非布尔值（0/undefined/'yes'）不再被 truthy 强转 —— 原来 `setKeepHistory(0)` 会**静默推进"不可逆删除"模式**，现在非布尔一律忽略并返回当前值；
+  ③ uid 提取改为优先信头像上的 `data-uid`，`data-id` 只作兜底（`data-id` 是 `uid_消息id` 拼串，uid 含下划线时会切出假 uid 导致漏删，既有问题）；
+  ④ 面板 `maxHeight` 随视口收缩（矮视口下不再顶着 540px 越界）。
+  测试补两个**真实盲区**（审查用变异测试证明原套件锁不住这次改动最关键的两行）：新增 W37（两个新开关真的点得动+方框同步+落盘）、W40（逐行行为门的确定性用例，不靠 5 秒定时）；core 新增"发布件必须等于源码"；`tests/真机自测.js` 新增 `__T.retained()` 验 A2。
+  我自己复跑变异测试：行为门失效 → W33+W40 抓到；会话隐藏门失效 → W35 抓到；开关回调接错字段 → W37 抓到。审查提的"475 行早退未被锁住"经复验属**不可观测**（保留历史时它只是性能捷径，真正的行为门是 464 行，已有两道用例守住）。
 - v0.1.11（2026-09-25）：**拉黑不再删除已有记录**（用户需求变更，原 A2 由"清掉旧消息"改为"保留旧消息"）。新增两个面板开关：
   「保留聊天记录（不删历史消息）」默认**开** —— 拉黑只拦新消息，房间/私聊里的旧消息都不再被删；关掉即回到 v0.1.10 及以前的"拉黑瞬间清掉旧消息"（不可逆）。
   「隐藏私聊会话条目」默认**开** —— 关掉则被拉黑者仍留在私聊会话列表里，可点开。

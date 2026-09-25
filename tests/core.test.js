@@ -256,6 +256,15 @@ t('normalizeStore 保留新增的记录保留开关（否则用户关掉后刷�
   eq(b.conf.hideSession, true, '非法值应回落默认 true');
 });
 
+t('发布件与源码一致：仓库根/release 的 iirose-blacklist.js 必须等于 src（防"发布件落后于源码"）', () => {
+  const fs = require('fs'), path = require('path');
+  const root = path.join(__dirname, '..');
+  const norm = (f) => fs.readFileSync(path.join(root, f), 'utf8').replace(/\r\n/g, '\n');
+  const src = norm('src/iirose-blacklist.js');
+  eq(norm('release/iirose-blacklist.js') === src, true, 'release/ 里的发布件落后于 src/（跑 node tools/publish.js）');
+  eq(norm('iirose-blacklist.js') === src, true, '仓库根目录的发布件落后于 src/（跑 node tools/publish.js）');
+});
+
 console.log('\n== 结果 ==');
 console.log('通过 ' + pass + ' / 失败 ' + fail);
 if (failures.length) { console.log('失败明细:'); failures.forEach(f => console.log('  - ' + f)); process.exit(1); }

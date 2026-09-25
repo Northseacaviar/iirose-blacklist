@@ -479,6 +479,93 @@ async function run() {
     await sleep(150);
   });
 
+  await t('W36 保留历史时，连"5 秒全扫"那趟也不删消息（A.sweep() 确定性触发 —— 审查③-1 缺口）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true); A.setKeepHistory(true);
+    const uid = 'sweep0000001z';
+    const h = document.getElementById('msgHolder');
+    const n = document.createElement('div');
+    n.className = 'msg'; n.dataset.id = uid + '_1700099003';
+    n.innerHTML = '<div class="wrap"><div class="msgavatar" data-uid="' + uid + '"></div>跨全扫</div>';
+    h.appendChild(n);
+    A.block(uid, '跨扫对象');                       // 已渲染 + 拉黑（block 内部就会全扫一次）
+    eq(A.sweep(), 0, '保留历史时全扫不该删任何消息');
+    ok(h.querySelector('[data-id^="' + uid + '"]'), '全扫把消息删了 —— sweepMessages 的早退失效');
+    eq(A.store.counters.dom >= 0, true);
+    A.unblock(uid);
+    n.parentNode && n.parentNode.removeChild(n);
+  });
+
+  await t('W37 面板两个新开关真的点得动、方框同步、落盘（审查③-2 缺口：原来没有用例点过）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setKeepHistory(true); A.setHideSession(true);
+    await sleep(150);
+    let p = panel();
+    ok(p, '面板没打开');
+    const kRow = () => panel().querySelector('[data-bl-key="keepHistory"]');
+    const hRow = () => panel().querySelector('[data-bl-key="hideSession"]');
+    ok(kRow() && hRow(), '找不到新开关行');
+
+    realClick(kRow()); await sleep(200);
+    eq(A.store.conf.keepHistory, false, '点「保留聊天记录」没切换');
+    eq(kRow().querySelector('span').textContent, '', '方框勾没同步（应无勾）');
+    eq(JSON.parse(localStorage.getItem('iirose_blacklist_v1')).conf.keepHistory, false, '没落盘');
+    realClick(kRow()); await sleep(200);
+    eq(A.store.conf.keepHistory, true, '再点应切回开');
+    eq(kRow().querySelector('span').textContent, '✓', '方框勾没同步（应有勾）');
+
+    realClick(hRow()); await sleep(200);
+    eq(A.store.conf.hideSession, false, '点「隐藏私聊会话条目」没切换');
+    realClick(hRow()); await sleep(200);
+    eq(A.store.conf.hideSession, true, '再点应切回开');
+  });
+
+  await t('W38 API 传非布尔值不改配置、不切到破坏性方向（审查③-4）', () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setKeepHistory(true);
+    eq(A.setKeepHistory(0), true, 'setKeepHistory(0) 不该关掉保留');
+    eq(A.setKeepHistory(undefined), true, 'setKeepHistory(undefined) 不该关掉保留');
+    eq(A.setKeepHistory(NaN), true, 'setKeepHistory(NaN) 不该关掉保留');
+    eq(A.store.conf.keepHistory, true, '配置被误改了');
+    eq(A.setKeepHistory(false), false, '布尔 false 应正常生效');
+    eq(A.setKeepHistory(true), true, '布尔 true 应正常生效');
+    eq(A.setEnabled(0), true, 'setEnabled(0) 不该关掉屏蔽总开关');
+    eq(A.store.enabled, true);
+  });
+
+  await t('W39 uid 含下划线时按 data-uid 取（审查③-5：data-id 拼串会切出假 uid）', () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    const n = document.createElement('div');
+    n.className = 'msg';
+    n.dataset.id = 'abcde_fghij_1700099004';
+    n.innerHTML = '<div class="wrap"><div class="msgavatar" data-uid="abcde_fghij"></div>下划线</div>';
+    eq(A._diag.uidOfMessageNode(n), 'abcde_fghij', 'uid 取错了（应优先 data-uid）');
+    const m = document.createElement('div');
+    m.className = 'msg';
+    m.dataset.id = 'plain0000000a_1700099005';                    // 没有头像 data-uid 时才回退 data-id
+    eq(A._diag.uidOfMessageNode(m), 'plain0000000a', 'data-id 兜底失效');
+  });
+
+  await t('W40 逐行行为门（确定性，不靠 5 秒定时/observer）：保留历史时不删、关掉后立刻删', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    const uid = 'gate00000001y';
+    const h = document.getElementById('msgHolder');
+    const n = document.createElement('div');
+    n.className = 'msg'; n.dataset.id = uid + '_1700099006';
+    n.innerHTML = '<div class="wrap"><div class="msgavatar" data-uid="' + uid + '"></div>门</div>';
+    h.appendChild(n);
+    A.block(uid, '门测试');                       // 已渲染 + 拉黑
+    A.setKeepHistory(true);
+    eq(A._diag.sweepNode(n), 0, '保留历史时 sweepNode 不该删（早期返回值≠0）');
+    ok(h.querySelector('[data-id^="' + uid + '"]'), '保留历史时逐行清扫把消息删了');
+    A.setKeepHistory(false);                     // 关掉保留 → 立刻全扫
+    await sleep(250);
+    ok(!h.querySelector('[data-id^="' + uid + '"]'), '关掉保留后逐行清扫没删消息');
+    A.setKeepHistory(true);
+    A.unblock(uid);
+  });
+
   const fail = results.filter((r) => !r.ok);
   const summary = { total: results.length, pass: results.length - fail.length, fail: fail.length, results };
   window.__RESULT__ = summary;

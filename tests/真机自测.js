@@ -35,6 +35,16 @@
     }, 500);
   };
 
-  window.__T = { U, S, go, tip: '步骤：__T.go() → __T.S.block(__T.U,\'测试甲\') → __T.go() 应看不到' };
+  // A2（v0.1.11 起的新口径）：拉黑后**已经渲染出来的旧消息应当仍在**。
+  // 用法：__T.go() 看到 true → __T.S.block(__T.U,'测试甲') → __T.retained() 应为 true
+  const retained = () => {
+    const still = document.documentElement.innerText.indexOf('这是房间消息') >= 0;
+    console.log('[自测] 拉黑后旧消息仍在界面？', still,
+      '| 保留聊天记录开关 =', S.store.conf.keepHistory !== false,
+      '| 若这里是 false 而开关是开的 → 保留历史失效，把这个结果发我');
+    return still;
+  };
+
+  window.__T = { U, S, go, retained, tip: '步骤：__T.go()（应看到）→ __T.retained()（应 true）→ __T.S.block(__T.U,\'测试甲\') → __T.go() 应看不到、__T.retained() 仍应 true' };
   console.log('[自测] 就绪。' + window.__T.tip);
 })();

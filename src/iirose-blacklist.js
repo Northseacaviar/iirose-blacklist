@@ -1,5 +1,5 @@
 /*!
- * iirose 拉黑屏蔽 · iirose-blacklist v0.1.9
+ * iirose 拉黑屏蔽 · iirose-blacklist v0.1.12
  * 作者：Corvin Hermes（为北海做）
  *
  * 作用：在 iirose（蔷薇花园）里拉黑某人后 ——
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.1.11';
+  const VERSION = '0.1.12';
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -376,7 +376,7 @@
   }
 
   /* ==========================================================================
-   * DOM 兜底：清掉已渲染的历史消息 / 私聊会话项
+   * DOM 兜底：默认【不删】已渲染的历史消息（只记诊断），仅当关掉「保留聊天记录」才清；私聊会话项按开关隐藏
    * ========================================================================== */
   // 站点把消息节点的 data-id 记作 "uid_消息id"（iiroseForge 依赖同一约定）。
   // 但不能盲切：万一 uid 形态变了导致切出来的不是 uid，就返回 null 交给 data-uid 兜底。
@@ -391,12 +391,12 @@
   function uidOfMessageNode(node) {
     if (!node || node.nodeType !== 1) return null;
     const ds = node.dataset || {};
-    const byId = uidFromId(ds.id);
-    if (byId) return byId;
+    // 优先信站点自己写的 data-uid（头像上带的），data-id 只作兜底：
+    // data-id 是 "uid_消息id" 拼串，uid 里含下划线时会被切出假 uid（审查 2026-09-25 ③-5 实测）
     if (looksLikeUid(ds.uid)) return ds.uid;
     const av = node.querySelector && node.querySelector('[data-uid]');
     if (av && av.dataset && looksLikeUid(av.dataset.uid)) return av.dataset.uid;
-    return null;
+    return uidFromId(ds.id);
   }
 
   // 找到"该删哪一行"：正常消息是 .msg；系统消息（pubMsgSystem 等）没有 .msg 祖先，
@@ -830,7 +830,7 @@
 
     const panel = el('div', {
       position: 'fixed', left: (window.innerWidth - 360) + 'px', top: (window.innerHeight - 560) + 'px',
-      width: '330px', maxHeight: '540px', background: '#1e1f26', borderRadius: '10px',
+      width: '330px', maxHeight: Math.min(540, Math.max(200, window.innerHeight - 40)) + 'px', background: '#1e1f26', borderRadius: '10px',
       boxShadow: '0 4px 24px rgba(0,0,0,.6)', zIndex: Z, display: 'none',
       flexDirection: 'column', overflow: 'hidden', color: '#eee',
       fontFamily: 'PingFang SC, Microsoft YaHei, sans-serif', fontSize: '12px',
@@ -1000,7 +1000,7 @@
 
     function refreshStats() {
       const c = store.counters;
-      let t = '已屏蔽：房间 ' + c.room + ' · 私聊 ' + c.priv + ' · 弹幕 ' + c.danmaku + ' · 历史 ' + c.dom;
+      let t = '已屏蔽：房间 ' + c.room + ' · 私聊 ' + c.priv + ' · 弹幕 ' + c.danmaku + ' · 历史/会话 ' + c.dom;
       if (c.abnormal) t += ' · 可疑帧 ' + c.abnormal;
       if (c.err) t += ' · 异常 ' + c.err;
       stats.textContent = t;
@@ -1141,7 +1141,8 @@
     delete store.uids[uid];
     saveStore();
     log('解除拉黑', uid);
-    statusMsg('已解除 ' + uid + '（旧消息已删，不会恢复；之后的消息可见）', '#68b26d');
+    statusMsg('已解除 ' + uid + '（之后的消息恢复可见）'
+      + (store.conf.keepHistory === false ? '；之前被清掉的旧消息不会回来' : '；已有记录一直保留着'), '#68b26d');
     if (ui) { ui.refreshAll(); }
     try { hideSessionNodes(); } catch (e) { noteError('恢复会话项', e); }   // 恢复被隐藏的私聊会话项
   }
@@ -1251,12 +1252,13 @@
       get store() { return store; },
       get hooked() { return isHooked(); },          // 实时判定，不是一次性闩锁
       flush: flushSave,
-      // 三个开关的非鼠标入口（面板点不动时的备用路径，也是排障对照：API 生效但点击不生效 → 事件被站点吞了）
-      setEnabled: function (v) { store.enabled = !!v; saveStore(); if (ui) ui.refreshAll(); return store.enabled; },
-      setDebug: function (v) { store.conf.debug = !!v; saveStore(); if (ui) ui.refreshAll(); return store.conf.debug; },
-      setRightClick: function (v) { store.conf.rightClick = !!v; saveStore(); if (ui) ui.refreshAll(); return store.conf.rightClick; },
-      setKeepHistory: function (v) { store.conf.keepHistory = !!v; saveStore(); if (ui) ui.refreshAll(); if (!store.conf.keepHistory) sweepAll(); return store.conf.keepHistory; },
-      setHideSession: function (v) { store.conf.hideSession = !!v; saveStore(); if (ui) ui.refreshAll(); hideSessionNodes(); return store.conf.hideSession; },
+      // 5 个开关的非鼠标入口（面板点不动时的备用路径，也是排障对照：API 生效但点击不生效 → 事件被站点吞了）
+      // 非布尔入参一律忽略并返回当前值：绝不因误传（0/undefined/'yes'）切到会删记录/关掉屏蔽的方向
+      setEnabled: function (v) { if (typeof v !== 'boolean') return store.enabled; store.enabled = v; saveStore(); if (ui) ui.refreshAll(); return v; },
+      setDebug: function (v) { if (typeof v !== 'boolean') return !!store.conf.debug; store.conf.debug = v; saveStore(); if (ui) ui.refreshAll(); return v; },
+      setRightClick: function (v) { if (typeof v !== 'boolean') return store.conf.rightClick !== false; store.conf.rightClick = v; saveStore(); if (ui) ui.refreshAll(); return v; },
+      setKeepHistory: function (v) { if (typeof v !== 'boolean') return store.conf.keepHistory !== false; store.conf.keepHistory = v; saveStore(); if (ui) ui.refreshAll(); if (!v) sweepAll(); return v; },
+      setHideSession: function (v) { if (typeof v !== 'boolean') return store.conf.hideSession !== false; store.conf.hideSession = v; saveStore(); if (ui) ui.refreshAll(); hideSessionNodes(); return v; },
       block: block,
       unblock: unblock,
       isBlocked: isBlocked,
