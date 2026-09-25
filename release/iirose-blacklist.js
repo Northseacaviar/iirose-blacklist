@@ -1,5 +1,5 @@
 /*!
- * iirose 拉黑屏蔽 · iirose-blacklist v0.1.13
+ * iirose 拉黑屏蔽 · iirose-blacklist v0.2.0
  * 作者：Corvin Hermes（为北海做）
  *
  * 作用：在 iirose（蔷薇花园）里拉黑某人后 ——
@@ -16,11 +16,79 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.1.13';
+  const VERSION = '0.2.0';
+  const VERSION_CODE = 15;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
   const TAG = '[拉黑]';
+
+  /* ==========================================================================
+   * SHELL / STORAGE：官方插件形态（Ext.Service）与存储适配
+   *   站长 2026-09 发的插件规范要求：包信息须用 Ext.Service.install 登记，
+   *   且「不许私自写入 localStorage」—— 设置用 instance.settings、数据用 instance.database。
+   *   现状：站点还没开插件市场（站长明确暂不开放），所以本插件仍以「自定义 JS 注入」为主，
+   *   两条路都支持：① 有官方运行时 → 走 settings 并登记包信息；② 没有 → 退回 localStorage 并在控制台说明。
+   *   返回值的容错：官方 settings 可能回字符串也可能回对象，这里两种都吃；写入统一送 JSON 字符串。
+   * ========================================================================== */
+  // #region STORAGE
+  const PKG_NAME = 'Northseacaviar.iiroseBlacklist';   // 格式：作者名.应用名（英文数字下划线）
+  const PKG_META = {
+    name: '拉黑屏蔽',
+    author: 'Northseacaviar',
+    privacy: '在浏览器本地读取聊天与私聊消息内容，仅用于比对黑名单做屏蔽；不修改消息、不上报、不转发给任何第三方。黑名单与设置保存在插件自己的存储里。',
+    versionName: VERSION,
+    versionCode: VERSION_CODE,
+    description: '拉黑某人后，同一房间里看不到对方的头像和消息，私聊也收不到；可随时解除，名单本地保存。',
+    outerLoad: '',                     // 无任何外部 js/css/html 引用（单文件、零依赖）
+    icon: '', cover: '', poster: '',   // TODO 提交前补：图标 1:1 直链、封面/海报 16:9 直链
+    device: '*',
+    runAt: 'allReady',                 // 规范推荐默认；收包钩子自带 5 秒自愈，晚挂上也不漏
+  };
+
+  let service = null;
+  try {
+    if (typeof Ext !== 'undefined' && Ext && Ext.Service && typeof Ext.Service.install === 'function') {
+      service = Ext.Service.install(PKG_NAME, PKG_META);
+    }
+  } catch (e) { service = null; }
+
+  const storageMode = service ? 'service' : 'local';
+  const storageLabel = () => (service ? '官方 settings' : '本地注入（localStorage）');
+
+  // 读：官方可能回字符串或对象，两种都向上兼容；出错返回 null（调用方按"没存过"处理）
+  function storageRead(key) {
+    try {
+      if (service) { const v = service.settings(key); return v === undefined ? null : v; }   // 没存过统一回 null（与 localStorage 一致）
+      return localStorage.getItem(key);
+    } catch (e) { storageWarn('读取存储', e); return null; }
+  }
+  // 写：成功返回 null，失败返回错误对象（调用方据此置 saveFailed 并让用户看见）
+  function storageWrite(key, text) {
+    try {
+      if (service) service.settings(key, text); else localStorage.setItem(key, text);
+      return null;
+    } catch (e) { return e || new Error('unknown'); }
+  }
+  function storageRemove(key) {
+    try {
+      if (service) { if (typeof service.removeSettings === 'function') service.removeSettings(key); }
+      else localStorage.removeItem(key);
+      return null;
+    } catch (e) { return e || new Error('unknown'); }
+  }
+  function storageText(v) {                     // 统一成字符串：官方那边可能是对象
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'string') return v;
+    try { return JSON.stringify(v); } catch (e) { return null; }
+  }
+  function storageWarn(where, e) {
+    try {
+      if (typeof noteError === 'function') noteError(where, e);
+      else console.warn(TAG, where, (e && e.message) || e);
+    } catch (_) { }
+  }
+  // #endregion STORAGE
 
   /* ==========================================================================
    * CORE：纯数据层（不碰 DOM / window，可被 tests/core.test.js 单独 extract 跑）
@@ -234,13 +302,10 @@
   })();
 
   function writeStore() {
-    try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(store));
-      saveFailed = false;
-    } catch (e) {
-      saveFailed = true;             // 配额/隐私模式/存储分区：不落盘，但要让用户看得见
-      noteError('名单落盘失败（本次会话内仍生效）', e);
-    }
+    const err = storageWrite(STORE_KEY, JSON.stringify(store));
+    if (!err) { saveFailed = false; return; }
+    saveFailed = true;               // 配额/隐私模式/存储分区：不落盘，但要让用户看得见
+    noteError('名单落盘失败（本次会话内仍生效）', err);
   }
 
   function flushSave() {
@@ -249,14 +314,13 @@
   }
 
   function loadStore() {
-    let rawText = null;
-    try { rawText = localStorage.getItem(STORE_KEY); } catch (e) { noteError('读取 localStorage', e); }
+    let rawText = storageText(storageRead(STORE_KEY));
     let raw = null;
     try {
       raw = JSON.parse(rawText || 'null');
     } catch (e) {
       // 原值先备份再回落默认值，避免"解析失败→空名单→下次保存覆盖原始数据"的不可恢复
-      try { if (rawText) { localStorage.setItem(STORE_KEY + '_corrupt', rawText); console.warn(TAG, '名单解析失败，原值已备份到 ' + STORE_KEY + '_corrupt'); } } catch (_) { }
+      try { if (rawText) { storageWrite(STORE_KEY + '_corrupt', rawText); console.warn(TAG, '名单解析失败，原值已备份到 ' + STORE_KEY + '_corrupt'); } } catch (_) { }
       raw = null;
     }
     if (raw && typeof raw === 'object' && raw.v !== 1) {
@@ -706,9 +770,10 @@
   function selfCheck() {
     const info = hitTestControls();
     const bad = info.filter((i) => !i.visible || (!i.insideRow && !i.clippedOut));
-    const line = bad.length
+    let line = bad.length
       ? ('自检：' + bad.length + '/' + info.length + ' 个控件点不到 → ' + bad.map((b) => b.what + '(该点位是 ' + b.topEl + ')').join('；'))
       : ('自检：' + info.length + ' 个控件命中正常');
+    line += '｜存储：' + storageLabel();
     log(line);
     // 写进常驻自检行（不是状态行——状态行会被后续操作覆盖，结论就丢了）
     if (ui && ui.diagLine) {
@@ -1294,6 +1359,8 @@
       },
       rawStats: () => JSON.parse(JSON.stringify(rawStats)),
       // 内部函数直通（真机排障用，便于逐行验证判断链）
+      storage: function () { return { mode: storageMode, label: storageLabel(), key: STORE_KEY }; },
+      pkg: function () { return { name: PKG_NAME, meta: PKG_META, installed: !!service }; },
       _diag: {
         uidOfMessageNode: uidOfMessageNode,
         rowFor: rowFor,

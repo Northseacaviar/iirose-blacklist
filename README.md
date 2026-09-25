@@ -46,7 +46,8 @@
 
 ```
 src/      插件源码（单文件 IIFE，即成品）
-tests/    子测试：Node 单测（提取 #region CORE）+ 浏览器假 socket 联调 harness
+tests/    子测试：Node 单测（提取 #region CORE / #region STORAGE）+ 浏览器假 socket 联调 harness
+          + official-mode.html（官方插件形态：假 Ext.Service，验合规与存储）
 docs/     调研笔记、审查报告
 release/  发布件（推 GitHub / jsdelivr 用）
 tools/    发布件同步脚本（node tools/publish.js，--check 只校验）
@@ -62,6 +63,27 @@ start.bat 本地托管（自定义 JS 注入调试用）
 4. 刷 jsdelivr 缓存（分支地址有小时级缓存，tag 地址不用刷）：
    `curl "https://purge.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklist.js"`
 5. 复核：拉默认地址与 `@vX.Y.Z` 地址，比对 md5 与 `VERSION` 常量
+
+## 官方插件规范对齐（2026-09-25 站长发布）
+
+站长在论坛发了插件规范（模板即 `Ext.Service.install` 那套；核心两条：**用包壳登记元信息**、**不许私自写 localStorage**）。
+现状：**站点没有插件市场，站长明确暂不开放**（怕出事拖累平台）。因此本插件仍以「自定义 JS 注入」为主，但代码已按规范做成**双形态**，将来要提交时不必重构。
+
+| 规范要求 | 本插件的做法 |
+|---|---|
+| `packageName` = 作者名.应用名（英文数字下划线） | `Northseacaviar.iiroseBlacklist` |
+| `package` 元信息 | 全 12 项都提供（源码 `PKG_META`）；其中 `privacy` 公示：**在本地读取聊天/私聊消息内容用于比对黑名单，不修改、不上报、不转发** |
+| **不许私自写 localStorage** | 检测到官方运行时 → 走 `instance.settings/removeSettings`（`#region STORAGE` 适配层）；没有运行时 → 才退回 localStorage，且自检行写明「存储：本地注入（localStorage）」 |
+| `versionName` + `versionCode`（数字，每次发布递增 1） | `VERSION`（字符串）与 `VERSION_CODE`（数字，当前 15）—— **发版两处都要改** |
+| `outerLoad` 公示外部引用 | 空串（单文件、零依赖，不引任何外部 js/css/html） |
+| `runAt` | `allReady`（规范推荐默认；收包钩子有 5 秒自愈，晚挂上也不漏） |
+| `device` | `*` |
+| 不得混淆加密 | 源码可读、未压缩、无打包 |
+| `icon` / `cover` / `poster` | **待补**（提交前补 1:1 与 16:9 直链） |
+
+验收方式：`tests/official-mode.html`（用假 `Ext.Service` 专页跑 23 项断言：包名格式、元信息字段齐、存储走 settings、**localStorage 里不出现名单**）。
+
+**已知前提（待站长真开通道时要验）**：官方运行时若把插件装到父页面、而 socket 在 `i.html` iframe 里，还需要一步跨 frame 适配；当前代码假设「插件与其操作的 socket 在同一上下文」。
 
 ## 给朋友用（一行地址）
 
@@ -82,7 +104,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
    （`extJs` 支持空格分隔多个地址，可与点歌插件同时注入）
 2. 朋友用：注入 jsdelivr 地址（发布后填）
 3. 界面：右下角悬浮球 🚫 → 面板；右键房间消息头像 → 直接拉黑
-4. 自测：`node tests/core.test.js`（核心逻辑 35 项）、浏览器打开 `tests/harness.html`（联调 42 项，含假 socket 重连自愈、"站点式 click preventDefault"下控件仍可用）
+4. 自测：`node tests/core.test.js`（核心逻辑 39 项）、浏览器打开 `tests/harness.html`（联调 43 项）与 `tests/official-mode.html`（官方形态 23 项）
 5. 面板点不动时的排障：`__IIROSE_BLACKLIST__._diag.hitTest()` 看控件是否被盖住/尺寸归零；`__IIROSE_BLACKLIST__._diag.watchClick()` 装点击探针，再点一下开关，看控制台打出哪几层事件；`setEnabled/setDebug/setRightClick/setKeepHistory/setHideSession` 是不依赖鼠标的备用入口（非布尔入参一律忽略，绝不会误切到会删记录的方向）；`sweep()` 可手动触发一次全扫，`debugSweep()` 逐行报告 DOM 清扫的判断结果
 
 ## 手机（触屏）怎么用
@@ -110,6 +132,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/iirose-blacklist.js
 
 ## 版本
 
+- v0.2.0（2026-09-25）：**按站长插件规范做合规外壳（双形态）**。新增 `#region STORAGE`：检测 `Ext.Service` 存在就用 `instance.settings` 存取并登记包信息（包名 `Northseacaviar.iiroseBlacklist`、12 项元信息、`privacy` 公示"本地读取消息内容用于过滤、不上报"、`versionCode` 数字递增、`outerLoad` 空串、`runAt: allReady`），不存在（当前注入形态）才退回 localStorage，并在**自检行**显示「存储：官方 settings / 本地注入（localStorage）」。新增 API `storage()` / `pkg()`。测试：核心 39 项（+4 条存储双形态）、联调 43 项（+W43）、新增 `tests/official-mode.html` 23 项（假 Ext.Service，验"官方形态下 localStorage 里不出现名单"）。图片（icon/cover/poster）与跨上下文适配按用户决定暂缓 —— 等站长开放提交通道再补。
 - v0.1.13（2026-09-25）：**修两个真机反馈的 bug**（北海实测报回；修完**真机验收通过**）:
   ① **已拉黑名单显示不出来、点不到「解除」**：面板内容比视口高时（聊天 iframe 矮，实测 1280×420 与 390×340 都触发 —— 见 `maxHeight` 计算），两个名单是唯一可被 flex 压缩的子项，被挤成 0 高（按钮还在 DOM 里，只是被裁掉）。修法：面板本体改为**自身可滚动**（`overflowY:auto`）+ 两个名单 `min-height:46px` 且 `flex-shrink:0` → 内容再高也能滚到、名单永远可读。
   ② **点标题栏的 × 关不掉面板**（只能点悬浮球）：标题栏同时是拖动把手，按住 × 时把手 `setPointerCapture` 把 `pointerup` 截走 → × 收不到抬手；紧随其后的 mouseup/click 又被 v0.1.10 加的"触屏兼容鼠标去重"（80ms）掐掉 → × 永远不触发。修法：把手内的可点控件（`[data-bl-nodrag]`）不启动拖动、不捕获指针；× 的点击区从 16px 字号无内边距放大到 34×30 起（触屏点得中）；另加 **Esc 关闭**作非鼠标退路。
