@@ -236,6 +236,15 @@ t('shape 校验：残片必被识破（消息id 非数字 / uid 位不是 uid）
   eq(L.isRecordShaped(['1706775936', 'http://av', 'n', '', '', '', '1', '', '6533df3d933bf'], 'room'), true);
 });
 
+t('normalizeStore 保留面板位置（否则拖到的位置落盘后会丢）', () => {
+  const a = L.normalizeStore({ conf: { panel: { left: 100, top: 200 } } });
+  eq(a.conf.panel.left, 100); eq(a.conf.panel.top, 200);
+  const b = L.normalizeStore({ conf: { panel: { left: 'x', top: 1 } } });
+  eq(b.conf.panel, null, '非法值应回落 null（自动摆放）');
+  const c = L.normalizeStore({});
+  eq(c.conf.panel, null);
+});
+
 console.log('\n== 结果 ==');
 console.log('通过 ' + pass + ' / 失败 ' + fail);
 if (failures.length) { console.log('失败明细:'); failures.forEach(f => console.log('  - ' + f)); process.exit(1); }
