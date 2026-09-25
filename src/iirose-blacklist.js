@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.2.0';
-  const VERSION_CODE = 15;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.2.1';
+  const VERSION_CODE = 16;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -108,8 +108,10 @@
         rightClick: true,
         debug: false,
         panel: null,          // 用户拖到的面板位置（null=自动摆放）
-        // 拉黑只拦新消息、不动已有记录（2026-09-25 北海定的默认行为）
-        keepHistory: true,    // true=不删已渲染的历史消息（房间+私聊）；false=拉黑瞬间清掉旧消息（v0.1.10 及以前的行为）
+        // 拉黑时遍历聊天记录，清掉被拉黑者的历史（点播卡片 + 消息）——2026-09-25 北海重新界定需求后的默认行为
+        keepHistory: false,   // false=拉黑瞬间清掉他的历史消息（默认）；true=文字历史只留不删，只拦新消息
+        // 点播卡片（媒体消息）单独一档：卡片不算"聊天记录"，即使 keepHistory 开着也照清
+        clearCards: true,     // true=被拉黑者的历史点播卡片照清；false=卡片也跟着保留
         hideSession: true,    // true=隐藏被拉黑者的私聊会话条目；false=列表里保留，可点开
       },
     };
@@ -134,6 +136,7 @@
       if (typeof raw.conf.rightClick === 'boolean') s.conf.rightClick = raw.conf.rightClick;
       if (typeof raw.conf.debug === 'boolean') s.conf.debug = raw.conf.debug;
       if (typeof raw.conf.keepHistory === 'boolean') s.conf.keepHistory = raw.conf.keepHistory;
+      if (typeof raw.conf.clearCards === 'boolean') s.conf.clearCards = raw.conf.clearCards;
       if (typeof raw.conf.hideSession === 'boolean') s.conf.hideSession = raw.conf.hideSession;
       if (raw.conf.panel && typeof raw.conf.panel.left === 'number' && typeof raw.conf.panel.top === 'number') {
         s.conf.panel = { left: raw.conf.panel.left, top: raw.conf.panel.top };
@@ -463,6 +466,15 @@
     return uidFromId(ds.id);
   }
 
+  // 点播卡片行判定：卡片行的 class 里必有 systemCardMediaShare
+  // （真机实测 2026-09-25：<div class="systemCardMediaSharePubMsgScale chatContentHolder …">；
+  //  "某某点播了…"那种系统播报行里也嵌着同一个小卡片，所以一并算卡片行）
+  // 用途：媒体卡片不算"聊天记录"，保留历史时也要按 uid 清掉（见 sweepNode）
+  function isCardRow(row) {
+    if (!row || !row.querySelector) return false;
+    try { return !!row.querySelector('[class*="systemCardMediaShare"]'); } catch (e) { return false; }
+  }
+
   // 找到"该删哪一行"：正常消息是 .msg；系统消息（pubMsgSystem 等）没有 .msg 祖先，
   // 就向上找 msgholderBox 的直接子节点，整行删掉而不是只删头像。
   // 上行深度封顶 3 层：站点若在消息与容器之间插了"分组/日期"包裹层，继续上行会误删整组别人的消息（违反"零影响"）。
@@ -525,7 +537,12 @@
       const hit = !!(uid && store.enabled && isBlocked(uid));
       diag.hits.push({ uid: uid, blocked: hit, hasParent: !!row.parentNode, sameAsRoot: row === root });
       if (hit) {
-        if (store.conf.keepHistory !== false) { diag.kept = true; return; }   // 默认：只记诊断，不删已有记录
+        // 点播卡片不算"聊天记录"：保留历史时也照清（2026-09-25 北海要求），
+        // 由「清除历史点播卡片」开关单独控制（conf.clearCards）
+        const card = isCardRow(row);
+        if (card) diag.card = true;
+        if (!card && store.conf.keepHistory !== false) { diag.kept = true; return; }   // 只在「保留历史消息」开着时才不删文字行
+        if (card && store.conf.clearCards === false) { diag.kept = true; return; }      // 用户关了卡片清理
         if (row.parentNode) { row.parentNode.removeChild(row); removed++; addCounter('dom'); }
       }
     });
@@ -536,12 +553,16 @@
 
   function sweepMessages() {
     let removed = 0;
-    if (store.conf.keepHistory !== false) return 0;      // 默认保留历史：整段跳过
+    // 保留历史时不再整段跳过：卡片行仍要清（见 sweepNode）；非卡片行直接早退，省掉候选扫描开销
+    const keep = store.conf.keepHistory !== false;
     try {
       const boxes = document.getElementsByClassName('msgholderBox');
       for (let b = 0; b < boxes.length; b++) {
         const kids = Array.prototype.slice.call(boxes[b].children);   // 先快照：删节点时 HTMLCollection 会位移
-        kids.forEach((n) => { removed += sweepNode(n); });
+        kids.forEach((n) => {
+          if (keep && !isCardRow(n)) return;
+          removed += sweepNode(n);
+        });
       }
     } catch (e) { noteError('消息清扫', e); }
     return removed;
@@ -943,13 +964,22 @@
     });
     panel.appendChild(rcToggle);
 
-    // 记录保留（2026-09-25 需求：拉黑时不要删掉已有记录，只拦新消息）
-    const keepToggle = toggleRow('keepHistory', '保留聊天记录（不删历史消息）', store.conf.keepHistory !== false, (on) => {
+    // 历史处理（2026-09-25 需求重新界定：拉黑时遍历聊天记录，清掉他的点歌卡片 + 历史消息）
+    const keepToggle = toggleRow('keepHistory', '拉黑时保留他的历史消息', store.conf.keepHistory !== false, (on) => {
       store.conf.keepHistory = on; saveStore();
-      setStatus(on ? '拉黑只拦新消息，已有记录都留着' : '已关闭保留：拉黑会清掉已有历史消息（不可逆）', on ? '#68b26d' : '#d0a04a');
-      setTimeout(() => { if (!on) sweepAll(); }, 50);      // 关掉的瞬间按旧行为清一次
+      setStatus(on ? '只拦新消息，他的历史消息都留着（点播卡片仍会清）' : '拉黑时清掉他的历史消息 + 点播卡片（不可逆）', on ? '#68b26d' : '#d0a04a');
+      setTimeout(() => { sweepAll(); }, 50);      // 两个方向都立刻扫一次：关掉=清，打开=对已拉的也重新评估
     });
     panel.appendChild(keepToggle);
+
+    // 点播卡片（2026-09-25 北海实测反馈：拉黑后对方的历史点播卡片还挂在聊天里）
+    // 卡片是媒体消息，不算聊天记录 —— 「保留历史消息」开着时也照样清
+    const cardToggle = toggleRow('clearCards', '清除历史点播卡片', store.conf.clearCards !== false, (on) => {
+      store.conf.clearCards = on; saveStore();
+      setStatus(on ? '拉黑时连他的历史点播卡片一起清掉' : '历史点播卡片保留（只拦新卡片）', on ? '#68b26d' : '#d0a04a');
+      setTimeout(() => { if (on) sweepAll(); }, 50);
+    });
+    panel.appendChild(cardToggle);
 
     const sessToggle = toggleRow('hideSession', '隐藏私聊会话条目', store.conf.hideSession !== false, (on) => {
       store.conf.hideSession = on; saveStore();
@@ -1082,7 +1112,7 @@
       // 真机上"看不到效果"的头号原因就是没挂上或落盘失败，这里必须显式显示
       const msgs = [];
       if (!isHooked()) msgs.push('⚠ 收包过滤未挂载（未登录？）——新消息不会被拦'
-        + (store.conf.keepHistory === false ? '，只有历史清扫生效' : '，历史清扫也关着（当前等于没生效）'));
+        + (store.conf.keepHistory === false ? '，只有历史清扫生效' : '，文字历史照留（点播卡片仍会清）'));
       if (saveFailed) msgs.push('⚠ 名单落盘失败（本次会话内仍生效）');
       if (c.err) msgs.push('存在内部异常 ' + c.err + ' 次（详见控制台）');
       if (msgs.length) { warn.textContent = msgs.join('；'); warn.style.display = 'block'; }
@@ -1097,6 +1127,7 @@
       debugToggle.__set(!!store.conf.debug);
       rcToggle.__set(store.conf.rightClick !== false);
       keepToggle.__set(store.conf.keepHistory !== false);
+      cardToggle.__set(store.conf.clearCards !== false);
       sessToggle.__set(store.conf.hideSession !== false);
     }
 
@@ -1222,7 +1253,8 @@
     saveStore();
     log('解除拉黑', uid);
     statusMsg('已解除 ' + uid + '（之后的消息恢复可见）'
-      + (store.conf.keepHistory === false ? '；之前被清掉的旧消息不会回来' : '；已有记录一直保留着'), '#68b26d');
+      + (store.conf.keepHistory === false ? '；之前被清掉的旧消息不会回来'
+        : (store.conf.clearCards !== false ? '；文字记录一直保留着（已清的点播卡片不会回来）' : '；已有记录一直保留着')), '#68b26d');
     if (ui) { ui.refreshAll(); }
     try { hideSessionNodes(); } catch (e) { noteError('恢复会话项', e); }   // 恢复被隐藏的私聊会话项
   }
@@ -1338,6 +1370,7 @@
       setDebug: function (v) { if (typeof v !== 'boolean') return !!store.conf.debug; store.conf.debug = v; saveStore(); if (ui) ui.refreshAll(); return v; },
       setRightClick: function (v) { if (typeof v !== 'boolean') return store.conf.rightClick !== false; store.conf.rightClick = v; saveStore(); if (ui) ui.refreshAll(); return v; },
       setKeepHistory: function (v) { if (typeof v !== 'boolean') return store.conf.keepHistory !== false; store.conf.keepHistory = v; saveStore(); if (ui) ui.refreshAll(); if (!v) sweepAll(); return v; },
+      setClearCards: function (v) { if (typeof v !== 'boolean') return store.conf.clearCards !== false; store.conf.clearCards = v; saveStore(); if (ui) ui.refreshAll(); if (v) sweepAll(); return v; },
       setHideSession: function (v) { if (typeof v !== 'boolean') return store.conf.hideSession !== false; store.conf.hideSession = v; saveStore(); if (ui) ui.refreshAll(); hideSessionNodes(); return v; },
       block: block,
       unblock: unblock,
@@ -1351,7 +1384,7 @@
           const rows = [];
           Array.prototype.forEach.call(boxes[b].children, (n) => {
             const uid = uidOfMessageNode(n);
-            rows.push({ cls: String(n.className), id: (n.dataset && n.dataset.id) || '', uid: uid, blocked: !!(uid && isBlocked(uid)) });
+            rows.push({ cls: String(n.className), id: (n.dataset && n.dataset.id) || '', uid: uid, blocked: !!(uid && isBlocked(uid)), card: isCardRow(n) });
           });
           out.push({ boxIndex: b, childCount: boxes[b].children.length, rows: rows });
         }
@@ -1363,6 +1396,7 @@
       pkg: function () { return { name: PKG_NAME, meta: PKG_META, installed: !!service }; },
       _diag: {
         uidOfMessageNode: uidOfMessageNode,
+        isCardRow: isCardRow,
         rowFor: rowFor,
         sweepNode: sweepNode,
         isBlockedIn: (u) => isBlocked(u),

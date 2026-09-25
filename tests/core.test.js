@@ -284,13 +284,15 @@ t('normalizeStore 保留面板位置（否则拖到的位置落盘后会丢）',
 
 t('normalizeStore 保留新增的记录保留开关（否则用户关掉后刷新又变回默认）', () => {
   const d = L.normalizeStore({});
-  eq(d.conf.keepHistory, true, '默认应保留历史');
+  eq(d.conf.keepHistory, false, '默认应为"拉黑时清掉他的历史消息"（2026-09-25 需求重新界定）');
   eq(d.conf.hideSession, true, '默认隐藏会话条目');
-  const a = L.normalizeStore({ conf: { keepHistory: false, hideSession: false } });
-  eq(a.conf.keepHistory, false); eq(a.conf.hideSession, false);
-  const b = L.normalizeStore({ conf: { keepHistory: 'yes', hideSession: 1 } });
-  eq(b.conf.keepHistory, true, '非法值应回落默认 true');
+  eq(d.conf.clearCards, true, '默认应清掉被拉黑者的历史点播卡片');
+  const a = L.normalizeStore({ conf: { keepHistory: true, hideSession: false, clearCards: false } });
+  eq(a.conf.keepHistory, true); eq(a.conf.hideSession, false); eq(a.conf.clearCards, false);
+  const b = L.normalizeStore({ conf: { keepHistory: 'yes', hideSession: 1, clearCards: 0 } });
+  eq(b.conf.keepHistory, false, '非法值应回落默认 false（默认即清历史）');
   eq(b.conf.hideSession, true, '非法值应回落默认 true');
+  eq(b.conf.clearCards, true, '非法值应回落默认 true（绝不因误传变成"保留卡片"）');
 });
 
 t('发布件与源码一致：仓库根/release 的 iirose-blacklist.js 必须等于 src（防"发布件落后于源码"）', () => {

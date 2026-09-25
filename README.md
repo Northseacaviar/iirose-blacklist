@@ -25,7 +25,8 @@
 | 编号 | 验收项 | 判定方式 |
 |------|--------|----------|
 | A1 | 拉黑后，对方在房间发的消息**完全不出现**（含头像） | 真机：让对方发 3 条，聊天区 0 条出现 |
-| A2 | 拉黑**不删已有记录**：房间/私聊里对方的旧消息都留着，只有新消息进不来 | 真机：拉黑瞬间聊天区旧消息**仍在**；关掉「保留聊天记录」开关才清 |
+| A2 | 拉黑时**遍历聊天记录**清掉该用户的历史消息（默认行为，`keepHistory=false`） | 真机：拉黑瞬间对方在聊天区的旧消息消失；打开「拉黑时保留他的历史消息」则旧消息留着、只拦新消息 |
+| A2b | **点播卡片**也在拉黑瞬间一并清掉（含"某人点播了…"这类播报行），且**不受**「保留历史消息」开关影响 | 真机：拉黑后对方的历史卡片消失；打开「保留历史消息」后卡片**仍被清**；关掉「清除历史点播卡片」则卡片保留 |
 | A3 | 拉黑后，对方私聊你**收不到**（无消息、无红点、无声音） | 真机：让对方私聊 2 条 |
 | A4 | 非黑名单用户的消息**零影响**（内容、顺序、颜色不变） | 单测：帧字节级透传 |
 | A5 | 解除拉黑后立即恢复正常 | 真机：解除后再发消息可见 |
@@ -45,7 +46,8 @@
   - 其余（`%` 快照、`~`、`&1{...}` 媒体事件等）原样透传
 - 命中黑名单的记录整条剔除；剔除后帧为空则整帧丢弃 → 客户端根本收不到
 
-兜底：DOM 清扫 + MutationObserver，参照 iiroseForge `enableBlacklist()` 的 `.msgholderBox` / `.msg` / `dataset.id = uid_消息id` 结构。**v0.1.11 起它默认只用来隐藏私聊会话条目** —— 已渲染的历史消息不再被删（`keepHistory` 默认开）；关掉该开关才恢复“拉黑瞬间清掉旧消息”的旧行为。uid 优先取头像上的 `data-uid`，`data-id` 只作兜底（它含下划线时会切出假 uid，审查 2026-09-25 实测）。
+兜底：DOM 清扫 + MutationObserver，参照 iiroseForge `enableBlacklist()` 的 `.msgholderBox` / `.msg` / `dataset.id = uid_消息id` 结构。**v0.2.1 起默认口径是「拉黑即清历史」**（`keepHistory=false`）：每次拉黑都会遍历聊天记录，把该 uid 的历史消息与点播卡片一起清掉 —— 打开面板开关「拉黑时保留他的历史消息」才变回"只拦新消息、旧记录留着"。uid 优先取头像上的 `data-uid`，`data-id` 只作兜底（它含下划线时会切出假 uid，审查 2026-09-25 实测）。
+**卡片怎么按人认出来（v0.2.1，2026-09-25 北海真机反馈）**：点播卡片行**没有 `data-id`**，但行内深处（`.msgavatar` / `PubChatUserSettings`）带 `data-uid`，且行内必有 `systemCardMediaShare*` 类名 —— `uidOfMessageNode()` 本来就会往下钻取 `[data-uid]`，`isCardRow()` 用类名认出卡片行，两者一配就能按 uid 归属。卡片不算"聊天记录"，所以 `conf.clearCards`（面板开关「清除历史点播卡片」，默认开）让它在「保留历史消息」开着时也照样被清；关掉此开关则卡片保留。
 
 ## 目录
 
@@ -143,8 +145,9 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
    （`extJs` 支持空格分隔多个地址，可与点歌插件同时注入）
 2. 朋友用：注入 loader 那一行（见上面「给朋友用」）
 3. 界面：右下角悬浮球 🚫 → 面板；右键房间消息头像 → 直接拉黑
-4. 自测：`node tests/core.test.js`（核心逻辑 39 项）、浏览器打开 `tests/harness.html`（联调 43 项）、`tests/official-mode.html`（官方形态 23 项）、`tests/loader-test.html`（loader 本地 6 项）与 `tests/loader-cdn.html`（loader 走 CDN = 朋友路径）
-5. 面板点不动时的排障：`__IIROSE_BLACKLIST__._diag.hitTest()` 看控件是否被盖住/尺寸归零；`__IIROSE_BLACKLIST__._diag.watchClick()` 装点击探针，再点一下开关，看控制台打出哪几层事件；`setEnabled/setDebug/setRightClick/setKeepHistory/setHideSession` 是不依赖鼠标的备用入口（非布尔入参一律忽略，绝不会误切到会删记录的方向）；`sweep()` 可手动触发一次全扫，`debugSweep()` 逐行报告 DOM 清扫的判断结果
+4. 自测：`node tests/core.test.js`（核心逻辑 39 项）、浏览器打开 `tests/harness.html`（联调 46 项）、`tests/official-mode.html`（官方形态 23 项）、`tests/loader-test.html`（loader 本地 6 项）与 `tests/loader-cdn.html`（loader 走 CDN = 朋友路径）
+   - 注意：`official-mode.html` 里有一条断言是"官方形态下 localStorage 里不该有名单"。若在同一浏览器配置里先跑过 `harness.html`（它会往 localStorage 写名单），这条会假失败 —— 先 `localStorage.clear()` 再跑，或换无痕窗口。
+5. 面板点不动时的排障：`__IIROSE_BLACKLIST__._diag.hitTest()` 看控件是否被盖住/尺寸归零；`__IIROSE_BLACKLIST__._diag.watchClick()` 装点击探针，再点一下开关，看控制台打出哪几层事件；`setEnabled/setDebug/setRightClick/setKeepHistory/setClearCards/setHideSession` 是不依赖鼠标的备用入口（非布尔入参一律忽略，绝不会误切到会删记录的方向）；`sweep()` 可手动触发一次全扫，`debugSweep()` 逐行报告 DOM 清扫的判断结果（含 `card` 字段 = 该行是否算点播卡片行）
 
 ## 手机（触屏）怎么用
 
@@ -157,7 +160,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
    ```
 
 2. **悬浮球**：默认落在视口内（窄屏自动改大小 52px 并靠右下）；可拖动，拖过的位置会记住；视口变化后如果它被挤出屏幕，会自己拉回来。
-3. **拉黑**：长按某人头像约 0.55 秒 = 右键菜单（触屏没有右键）；也可以点悬浮球开面板，在「见过的人」里点拉黑。面板里的开关（启用屏蔽 / 调试日志 / 右键菜单 / 保留聊天记录 / 隐藏私聊会话条目）在触屏上点一次即生效。
+3. **拉黑**：长按某人头像约 0.55 秒 = 右键菜单（触屏没有右键）；也可以点悬浮球开面板，在「见过的人」里点拉黑。拉黑会**静默清掉 TA 的历史消息与点播卡片**（默认口径）。面板里的开关（启用屏蔽 / 调试日志 / 右键菜单 / 拉黑时保留他的历史消息 / 清除历史点播卡片 / 隐藏私聊会话条目）在触屏上点一次即生效；若不想清历史，把「拉黑时保留他的历史消息」打开。
 4. **排查手机端「不显示悬浮窗」**：注入 `mobile-probe.js`（同目录），它会在页面顶部挂一条红色横幅，直接写出：脚本跑在哪个上下文、视口多大、插件有没有落地、悬浮球在哪/被谁盖住、有没有脚本报错、`extJs` 里有没有地址。
    ```
    https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/mobile-probe.js
@@ -177,16 +180,24 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 本项目的 token 与花费由脚本直查本机 Hermes 会话库生成（只读），明细在 [`docs/成本账.md`](docs/成本账.md)。
 
 <!-- COST:BEGIN 由 tools/token-report.py --readme 生成，别手改 -->
-- 截至 2026-09-25 20:54（北京时间）：估算花费 **$0.7853**（≈6 元人民币）· 消息 484 · 工具调用 236
-- 结构：主开发会话 $0.66 ／ 子 agent 独立审查 $0.09 ／ 部分相关折算 $0.04（明细见 [`docs/成本账.md`](docs/成本账.md)）
+- 截至 2026-09-25 22:22（北京时间）：估算花费 **$1.0295**（≈7 元人民币）· 消息 339 · 工具调用 166
+- 结构：主开发会话 $0.90 ／ 子 agent 独立审查 $0.09 ／ 部分相关折算 $0.04（明细见 [`docs/成本账.md`](docs/成本账.md)）
 - 口径：`estimated_cost_usd` 是**估算不是账单**；`reasoning_tokens` 通常已含在输出口径里；缓存读占 ~98%，所以「总 token 近亿」不等于贵。
 - 复现：`python tools/token-report.py`（屏幕）· `--doc docs/成本账.md`（重写成本账）· `--readme README.md`（刷新本段）
 <!-- COST:END -->
 
 ## 版本
 
-**发布 tag**：`v0.2.0`（合规外壳）→ `v0.2.1`（loader v1）→ `v0.2.2`（loader v1.1 + vibecoding 署名）→ `v0.2.3`（loader v1.2 降级链 + 成本信息进文档）。
+**发布 tag**：`v0.2.0`（合规外壳）→ `v0.2.1`（loader v1）→ `v0.2.2`（loader v1.1 + vibecoding 署名）→ `v0.2.3`（loader v1.2 降级链 + 成本信息进文档）→ `v0.2.4`（插件 v0.2.1：拉黑即清历史 + 点播卡片）。
 **只有插件本体（`src/`）改动才升 `VERSION` 与 `VERSION_CODE`**（官方规范要求 versionCode 每次发布 +1）；loader 与文档改动不动插件版本。
+
+- 插件 v0.2.1（2026-09-25，需求重新界定 + 真机反馈）：**每次拉黑都遍历聊天记录，清掉被拉黑者的历史消息与点播卡片**。
+  需求原话（北海）："新增支持屏蔽被拉黑用户历史点歌卡片和消息的功能，可以在每次拉黑时遍历聊天记录，删除被拉黑用户的点歌卡片和历史消息"。
+  - **口径变更**：v0.1.11 定的"拉黑只拦新消息、历史一律保留"作废 —— `keepHistory` 默认改为 **false**（拉黑即清历史），面板开关改名为「拉黑时保留他的历史消息」（默认关；想要"只拦新消息"就打开它）。
+  - **新增「清除历史点播卡片」**（`conf.clearCards`，默认开）：卡片算媒体消息、不算聊天记录，所以它在「保留历史消息」开着时也照样被清；关掉此开关则卡片保留。
+  - 为什么之前卡片清不掉：卡片行**没有 `data-id`**（文字行有 `data-id="uid_消息id"`），按 uid 找行时看起来"这些行没有归属"。真机抓全量 HTML 后确认：卡片行的 uid 藏在行内深处（`.msgavatar` / `PubChatUserSettings` 上的 `data-uid`，每行 2 处），且行内必有 `systemCardMediaShare*` 类名 —— `uidOfMessageNode()` 本来就会往下钻取 `[data-uid]`，再配一个 `isCardRow()` 就能按人清。**（我第一版探针把 HTML 截断到 1500 字符，`data-uid` 恰好在 1500 之后 → 我据此误判"卡片行没有 uid"，这条弯路记在案。）**
+  - 实现：`sweepNode()` 里卡片行不受 `keepHistory` 约束（由 `clearCards` 单独控制）；`sweepMessages()` 在"保留历史"时不再整段跳过（非卡片行早退，省开销）；`block()` 内部本来就调 `sweepAll()`，"每次拉黑都遍历一遍"是现成路径，无需新入口。新增 API `setClearCards`、`_diag.isCardRow`，`debugSweep()` 每行多一个 `card` 字段；`tests/真机自测.js` 重写为 v2（`__T.goCard()` 伪造真机同款 `m__4` 卡片帧、`__T.check()` 一屏看全三件事）。
+  - 回归：核心 39/39（normalizeStore 断言改为新默认 + `clearCards` 容错）、联调 **47/47**（W9 改为默认语义；新增 W44/W45/W46/W47：卡片被清且同人文字按开关走、开关双向、卡片行 uid 归属、一次拉黑清掉消息+卡片而他人零影响；W24 开关行数断言 5→6）、官方形态 23/23（跑前需 `localStorage.clear()`，否则被 harness 的落盘串扰）。
 
 - loader v1.2（2026-09-25，独立于插件版本）：新增 `loader.js` 注入入口 —— 相对自身目录取主脚本、jsdelivr 上先取 `@main`（避开「无 ref 地址 = 最新 tag 快照」这个坑）、拉不到则**降级到最新 tag 快照**、`?t=时间戳` 绕开 7 天缓存、再失败换 fastly/gcore 域名、重复注入不重复拉、loader 地址自带版本则以版本为准。配套 `tests/loader-test.html`（本地 6 项）与 `tests/loader-cdn.html`（CDN 实链，含「主脚本确实走 @main」）。**用 loader 的用户以后不需要任何更新动作**。
 - v0.2.0（2026-09-25）：**按站长插件规范做合规外壳（双形态）**。新增 `#region STORAGE`：检测 `Ext.Service` 存在就用 `instance.settings` 存取并登记包信息（包名 `Northseacaviar.iiroseBlacklist`、12 项元信息、`privacy` 公示"本地读取消息内容用于过滤、不上报"、`versionCode` 数字递增、`outerLoad` 空串、`runAt: allReady`），不存在（当前注入形态）才退回 localStorage，并在**自检行**显示「存储：官方 settings / 本地注入（localStorage）」。新增 API `storage()` / `pkg()`。测试：核心 39 项（+4 条存储双形态）、联调 43 项（+W43）、新增 `tests/official-mode.html` 23 项（假 Ext.Service，验"官方形态下 localStorage 里不出现名单"）。图片（icon/cover/poster）与跨上下文适配按用户决定暂缓 —— 等站长开放提交通道再补。

@@ -137,9 +137,9 @@ async function run() {
     eq(A.isBlocked('myown0000001a'), false);
   });
 
-  await t('W9 DOM 兜底：关掉「保留聊天记录」后，拉黑瞬间清掉该用户的历史消息（旧行为，可切换）', async () => {
-    eq(A.store.conf.keepHistory !== false, true, 'v0.1.11 起默认应保留历史（不删已有记录）');
-    A.setKeepHistory(false);                             // 显式关掉，才走旧的删除路径
+  await t('W9 默认语义：拉黑瞬间清掉该用户的历史消息 + 点播卡片（2026-09-25 需求重新界定）', async () => {
+    eq(A.store.conf.keepHistory, false, 'v0.2.1 起默认「拉黑时清掉他的历史消息」');
+    eq(A.store.conf.clearCards, true, '默认「清除历史点播卡片」为开');
     A.block(ID.OLD, '旧用户');
     A.block(ID.PMOLD, '私聊对象');
     await sleep(300);
@@ -296,10 +296,10 @@ async function run() {
     const p = panel();
     ok(p, '面板没打开');
     const rows = Array.from(p.querySelectorAll('[data-bl-key]'));
-    ['enabled', 'debug', 'rightClick', 'keepHistory', 'hideSession'].forEach((k) => {
+    ['enabled', 'debug', 'rightClick', 'keepHistory', 'clearCards', 'hideSession'].forEach((k) => {
       ok(rows.some((r) => r.dataset.blKey === k), '缺开关行：' + k);
     });
-    eq(rows.length, 5, '开关行数应为 5，实际 ' + rows.length);
+    eq(rows.length, 6, '开关行数应为 6，实际 ' + rows.length);
     const rcRow = p.querySelector('[data-bl-key="rightClick"]');
     ok(rcRow, '找不到"右键头像弹拉黑菜单"开关行');
     eq(rcRow.querySelector('span').textContent, '✓', '开关默认应为开（方框里应有勾）');
@@ -637,6 +637,94 @@ async function run() {
     ok(p, '面板没打开');
     const r = A._diag.selfCheck();
     ok(/存储：/.test(r.line), '自检行应写明存储方式：' + r.line);
+  });
+
+  await t('W44 保留历史时：被拉黑者的历史点播卡片仍被清掉，同人的文字行保留（2026-09-25 北海实测反馈）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true); A.setKeepHistory(true); A.setClearCards(true);
+    const uid = 'card0000001m';
+    const h = document.getElementById('msgHolder');
+    const txt = document.createElement('div');
+    txt.className = 'msg'; txt.dataset.id = uid + '_1700099010';
+    txt.innerHTML = '<div class="wrap"><div class="msgavatar" data-uid="' + uid + '"></div>文字留着</div>';
+    const card = document.createElement('div');
+    card.className = 'msg'; card.setAttribute('t', '1700099011');          // 真机卡片行没有 data-id，只有 t
+    card.innerHTML = '<div class="msgcontent"><div class="room_chat_content">'
+      + '<div class="systemCardMediaSharePubMsgScale chatContentHolder publicMsgHasBubble bgLight">'
+      + '<div class="PubChatUserSettings"><div class="msgavatar" data-uid="' + uid + '"></div></div>'
+      + '<div class="InfoAuthor">某人</div><div class="InfoTagText">NeteaseMusic</div></div></div></div>';
+    eq(A._diag.isCardRow(card), true, '卡片行没被认出（class 里含 systemCardMediaShare）');
+    eq(A._diag.isCardRow(txt), false, '普通文字行被误判成卡片行');
+    h.appendChild(txt); h.appendChild(card);
+    A.block(uid, '卡片测试');                                   // block 内部会全扫一次
+    ok(!h.contains(card), '拉黑后历史点播卡片还在（clearCards 没生效）');
+    ok(h.contains(txt), '保留历史时同人的文字行不该被删');
+    txt.parentNode && txt.parentNode.removeChild(txt);
+    A.unblock(uid);
+  });
+
+  await t('W45 「清除历史点播卡片」开关双向生效：关掉后卡片保留，开回来立刻清', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    const h = document.getElementById('msgHolder');
+    const uid = 'card0000002n';
+    A.setClearCards(false);
+    const card = document.createElement('div');
+    card.className = 'msg';
+    card.innerHTML = '<div class="msgcontent"><div class="systemCardMediaShare chatContentHolder">'
+      + '<div class="msgavatar" data-uid="' + uid + '"></div>卡2</div></div>';
+    h.appendChild(card);
+    A.block(uid, '卡片测试2');
+    await sleep(300);
+    ok(h.contains(card), '关掉开关后卡片不该被删');
+    A.setClearCards(true);                                     // 内部会全扫一次
+    await sleep(250);
+    ok(!h.contains(card), '开回开关后卡片应被清掉');
+    A.unblock(uid);
+  });
+
+  await t('W46 卡片行的 uid 取自行内 data-uid（曾误判为"卡片行无 uid"），逐行清扫返回 1', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    const uid = 'card0000003p';
+    const card = document.createElement('div');
+    card.className = 'msg';
+    card.innerHTML = '<div class="msgcontent"><div class="systemCardMediaSharePubMsgScale">'
+      + '<div class="PubChatUserSettings"><div class="msgavatar" data-uid="' + uid + '"></div></div>'
+      + '</div></div>';
+    eq(A._diag.uidOfMessageNode(card), uid, 'uidOfMessageNode 没往下钻到卡片行里的 data-uid');
+    A.setClearCards(true); A.setKeepHistory(true);
+    if (!A.isBlocked(uid)) A.block(uid, '卡片测试3');
+    const h = document.getElementById('msgHolder');
+    h.appendChild(card);
+    eq(A._diag.sweepNode(card), 1, '卡片行逐行清扫应删掉它并返回 1');
+    ok(!card.parentNode, '卡片行没被删');
+    A.unblock(uid);
+  });
+
+  await t('W47 一次拉黑 = 遍历聊天记录清掉他的历史消息 + 点播卡片，他人一行不动（需求重新界定的确定性用例）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true); A.setKeepHistory(false); A.setClearCards(true);
+    const h = document.getElementById('msgHolder');
+    const uid = 'purge0000001r', other = 'purge0000002s';
+    const mk = (idAttr, inner) => {
+      const n = document.createElement('div');
+      n.className = 'msg';
+      if (idAttr) n.dataset.id = idAttr;
+      n.innerHTML = inner;
+      h.appendChild(n);
+      return n;
+    };
+    const mine1 = mk(uid + '_1700099020', '<div class="wrap"><div class="msgavatar" data-uid="' + uid + '"></div>我说的第一句</div>');
+    const mine2 = mk(null, '<div class="msgcontent"><div class="systemCardMediaSharePubMsgScale">'
+      + '<div class="msgavatar" data-uid="' + uid + '"></div>我的点歌卡片</div></div>');
+    mine2.setAttribute('t', '1700099021');                       // 真机卡片行只有 t，没有 data-id
+    const his = mk(other + '_1700099022', '<div class="wrap"><div class="msgavatar" data-uid="' + other + '"></div>别人的消息</div>');
+    A.block(uid, '待清用户');
+    await sleep(300);
+    ok(!h.contains(mine1), '他的历史消息没被清');
+    ok(!h.contains(mine2), '他的历史点播卡片没被清');
+    ok(h.contains(his), '别人的消息被误清（零影响被破坏）');
+    his.parentNode && his.parentNode.removeChild(his);
+    A.unblock(uid);
   });
 
   const fail = results.filter((r) => !r.ok);
