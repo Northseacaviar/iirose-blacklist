@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>loader 验收 · 朋友路径（CDN 实链）</title>
-<style>body{background:#111;color:#ddd;font:13px/1.7 monospace;padding:16px} .ok{color:#68b26d} .bad{color:#ec4141}</style>
+<style>body{background:#111;color:#ddd;font:13px/1.7 monospace;padding:16px} .ok{color:#68b26d} .bad{color:#ec4141} .dim{color:#888}</style>
 </head>
 <body>
 <div id="out">跑中…</div>
@@ -21,19 +21,41 @@
   const lines = []; let fail = 0;
   const ok = (c, m) => { lines.push((c ? '<span class="ok">ok   </span>' : '<span class="bad">FAIL </span>') + m); if (!c) fail++; };
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  for (let i = 0; i < 120 && !window.__IIROSE_BLACKLIST__; i++) await wait(100);
+  const pv = (v) => { const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(v || '')); return m ? (+m[1]) * 1e6 + (+m[2]) * 1e3 + (+m[3]) : -1; };
+
+  for (let i = 0; i < 150 && !window.__IIROSE_BLACKLIST__; i++) await wait(100);
   const A = window.__IIROSE_BLACKLIST__;
+  const S = window.__IIROSE_BLACKLIST_LOADER__ || {};
+
   ok(!!A, 'CDN 上的 loader 成功把插件拉起来（朋友路径）');
-  if (A) {
-    ok(A.version === window.__EXPECTED_VERSION__, '版本 = ' + A.version + '（期望 ' + window.__EXPECTED_VERSION__ + '，应是仓库当前最新）');
-    ok(A.storage().mode === 'local', '注入形态下存储 = local，自检行会写明：' + A.storage().label);
-    const srcs = [].slice.call(document.getElementsByTagName('script')).map((x) => x.src);
-    const main = srcs.filter((u) => /iirose-blacklist\.js\?t=\d+$/.test(u))[0];
-    ok(!!main && /cdn\.jsdelivr\.net/.test(main), '主脚本走 CDN + 时间戳绕缓存：' + (main || '没找到'));
-    ok(!!main, '主脚本被拉起（@main 优先，坏了会降级到 tag 快照）');
-    ok(!!main && /(@main|\/iirose-blacklist\.js\?t=)/.test(main), '取址符合降级链：' + (main || ''));
-    console.log('[验收] 实际用的是：' + main);
+  ok(!!S.self && /loader\.js/.test(S.self), 'loader 认出了自己的地址：' + S.self);
+  ok(S.mode === 'probe', '走了 v2 的「先比版本再注入」路径（mode=' + S.mode + '）');
+
+  // 探测明细：每个候选各读到什么版本
+  const probes = (S.probes || []).filter((p) => p.ver);
+  ok(probes.length >= 2, '探测读到了 ' + probes.length + ' 份候选的版本号（@main / 无 ref / tag，至少两类）');
+  probes.forEach((p) => lines.push('<span class="dim">     v' + p.ver + '  ← ' + p.url + '</span>'));
+
+  // 选中的必须是探测里版本最高的那一份 —— 这就是 v2 修掉的那个 bug
+  const best = probes.slice().sort((a, b) => pv(b.ver) - pv(a.ver))[0];
+  const chosenProbe = probes.filter((p) => p.url === S.chosen)[0];
+  if (best && chosenProbe) {
+    ok(pv(chosenProbe.ver) === pv(best.ver),
+      '选中的是探测到的最高版本：v' + chosenProbe.ver + '（探测里最高 v' + best.ver + '）');
+  } else {
+    ok(!!S.chosen, '选了地址（探测明细不完整）：' + S.chosen);
   }
+  ok(S.tag === null || /^v?\d+\.\d+\.\d+$/.test(S.tag), 'GitHub tag 发现结果：' + (S.tag || '拿不到（如实标 null，不影响选版）'));
+
+  if (A) ok(A.version === window.__EXPECTED_VERSION__, '插件版本 = ' + A.version + '（期望 ' + window.__EXPECTED_VERSION__ + '，= 仓库当前发布件）');
+  if (A) ok(A.storage().mode === 'local', '注入形态下存储 = local，自检行会写明：' + A.storage().label);
+
+  const srcs = [].slice.call(document.getElementsByTagName('script')).map((x) => x.src);
+  const main = srcs.filter((u) => /iirose-blacklist\.js\?t=\d+$/.test(u))[0];
+  ok(!!main && /cdn\.jsdelivr\.net/.test(main), '主脚本走 CDN + 时间戳绕缓存：' + (main || '没找到'));
+  ok(!S.fallback, '没有退到顺序注入兜底（说明探测本身成功）');
+  ok(!!A && pv(A.version) >= pv(best && best.ver), '实际跑起来的版本不低于任何候选（不会再出现"拉到了却是旧的"）');
+
   document.getElementById('out').innerHTML = lines.join('<br>') + '<br><br><b>' + (fail ? ('失败 ' + fail + ' 项') : '全部通过') + '</b>';
   window.__RESULT__ = { total: lines.length, fail: fail };
 })();

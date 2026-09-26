@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>loader v2 探测逻辑 · 单帧（由 loader-stub.html 驱动，单跑无意义）</title>
+<style>body{background:#111;color:#ddd;font:13px/1.7 monospace;padding:8px}</style>
+</head>
+<body>
+<div id="o">帧跑中…</div>
+<script>
+/* ------------------------------------------------------------------------------------------------
+ * loader v2 的「先比版本再注入」逻辑，靠桩把网络换掉来验（真 CDN 上碰不到这些组合）。
+ * 用 ?case=N 选场景；结果放在 window.__FRAME__ 里给父页读。
+ *   case=1  GitHub 能通 → 取到最高 tag；候选里 @main 旧、@v0.3.3 新 → 应选新
+ *   case=2  fetch 全挂（断网/被拦）→ 应退到顺序注入兜底（fallback=true）
+ *   case=3  GitHub 挂、jsdelivr 数据 API 通（且滞后）→ 仍要能选出可用的那一份
+ *   case=4  两个 API 都挂 → 无 tag 候选；@main 旧、无 ref 新（真实事故形状）→ 应选「新」的那份
+ * ---------------------------------------------------------------------------------------------- */
+var CASE = (location.search.match(/case=(\d)/) || [])[1] || '1';
+var BASE = 'https://cdn.jsdelivr.net/gh/Fake/repo/';
+window.__BL_LOADER_TEST__ = { base: BASE, repo: 'Fake/repo' };
+
+function txt(v) { return "/* fake main */\nconst VERSION = '" + v + "';\n"; }
+var VER = {
+  '1': { '@main': '0.3.2', '': '0.3.1', '@v0.3.3': '0.3.3' },
+  '3': { '@main': '0.3.2', '': '0.3.1' },
+  '4': { '@main': '0.3.2', '': '0.3.4' }        // 分支旧 / tag 快照新 = 2026-09-26 那次事故的形状
+}[CASE] || {};
+
+function fakeResp(body) { return { ok: true, status: 200, text: function () { return Promise.resolve(body); } }; }
+var seen = [];
+window.fetch = function (url) {
+  var u = String(url).split('?')[0];
+  seen.push(u);
+  if (CASE === '2') return Promise.reject(new TypeError('blocked: ' + u));
+  if (/api\.github\.com/.test(u)) {
+    if (CASE === '3' || CASE === '4') return Promise.reject(new TypeError('github blocked'));
+    return Promise.resolve(fakeResp(JSON.stringify([{ name: 'v0.2.9' }, { name: 'v0.3.3' }, { name: 'v0.3.1' }])));
+  }
+  if (/data\.jsdelivr\.com/.test(u)) {
+    if (CASE === '4') return Promise.reject(new TypeError('jsdelivr api blocked'));
+    return Promise.resolve(fakeResp(JSON.stringify({ versions: [{ version: '0.3.2' }] })));
+  }
+  // 候选主脚本：URL 形如 .../gh/Fake/repo@main/iirose-blacklist.js 或 .../gh/Fake/repo/iirose-blacklist.js
+  var m = /\/Fake\/repo(@[^/]+)?\/iirose-blacklist\.js$/.exec(u);
+  var key = m ? (m[1] || '') : null;
+  if (key !== null && VER[key] !== undefined) return Promise.resolve(fakeResp(txt(VER[key])));
+  return Promise.reject(new TypeError('404 ' + u));
+};
+window.__SEEN__ = seen;
+</script>
+<script src="../loader.js"></script>
+<script>
+/* 等 loader 做出选择（或决定兜底）后把状态交出去。给足时间：探测有 6s 超时。 */
+(function () {
+  var tries = 0;
+  var t = setInterval(function () {
+    var S = window.__IIROSE_BLACKLIST_LOADER__ || {};
+    tries++;
+    if (S.chosen || S.fallback || tries > 60) {
+      clearInterval(t);
+      window.__FRAME__ = {
+        case: CASE,
+        tag: S.tag || null,
+        chosen: S.chosen || null,
+        fallback: !!S.fallback,
+        candidates: S.candidates || [],
+        probes: (S.probes || []).map(function (p) { return { url: p.url, ver: p.ver }; }),
+        mode: S.mode,
+        injected: [].slice.call(document.getElementsByTagName('script')).map(function (x) { return x.src; })
+      };
+      document.getElementById('o').textContent = '帧完成 case=' + CASE;
+      window.__FRAME_DONE__ = 1;
+    }
+  }, 100);
+})();
+</script>
+</body>
+</html>
