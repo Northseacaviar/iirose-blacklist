@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>拖动边界钳制 夹具（file:// 直接跑）</title>
+<style>body{background:#111;color:#ddd;font:13px/1.6 Consolas,monospace;margin:0}#out{white-space:pre-wrap;padding:10px}
+.ok{color:#6d6}.bad{color:#f66;font-weight:bold}</style>
+</head>
+<body>
+<div id="out">跑测试中…</div>
+<!-- 最小假 DOM：够插件构建面板与 DOM 清扫路径 -->
+<div class="msgholderBox" id="msgHolder"></div>
+<div id="pmList"></div>
+<script>
+  window.socket = { _onmessage: function () { } };
+  window.uid = 'self00000000';
+</script>
+<script src="../src/iirose-blacklist.js"></script>
+<script>
+(function () {
+  const out = document.getElementById('out');
+  const lines = [];
+  let pass = 0, fail = 0;
+  // 诊断优先：夹具脚本自己崩了也要看得见（否则页面永远停在"跑测试中…"）
+  window.onerror = function (m, s, l, c) {
+    const o = document.getElementById('out');
+    if (o) o.innerHTML = '<span class="bad">夹具脚本异常：' + m + ' @' + (s || '').split('/').pop() + ':' + l + '</span>\n' + o.innerHTML;
+    return false;
+  };
+  function log(s, cls) { lines.push(cls ? '<span class="' + cls + '">' + s + '</span>' : s); }
+  document.title = '夹具已起动';
+  function ok(cond, name, detail) {
+    if (cond) { pass++; log('  PASS  ' + name + (detail ? '   ' + detail : ''), 'ok'); }
+    else { fail++; log('  FAIL  ' + name + '   ' + (detail || ''), 'bad'); }
+  }
+  function render() {
+    out.innerHTML = lines.join('\n');
+    const res = '结果 ' + pass + ' 通过 / ' + fail + ' 失败  —— 插件 v' + (window.__IIROSE_BLACKLIST__ ? window.__IIROSE_BLACKLIST__.version : '?')
+      + '  视口 ' + window.innerWidth + 'x' + window.innerHeight;
+    out.innerHTML = res + '\n' + out.innerHTML;
+    try { localStorage.setItem('dragclamp_result_v1', JSON.stringify({ pass: pass, fail: fail, at: Date.now(), text: lines.join('\n'), vw: window.innerWidth, vh: window.innerHeight })); } catch (e) { }
+  }
+
+  /* ---------- 合成手势（走插件真正监听的 pointer 事件） ---------- */
+  function pev(type, x, y) {
+    return new PointerEvent(type, {
+      bubbles: true, cancelable: true, composed: true,
+      clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse', isPrimary: true,
+      button: 0, buttons: type === 'pointerup' ? 0 : 1,
+    });
+  }
+  function dragTo(el, x1, y1) {
+    const r = el.getBoundingClientRect();
+    const x0 = r.left + r.width / 2, y0 = r.top + r.height / 2;
+    el.dispatchEvent(pev('pointerdown', x0, y0));
+    for (let i = 1; i <= 4; i++) el.dispatchEvent(pev('pointermove', x0 + (x1 - x0) * i / 4, y0 + (y1 - y0) * i / 4));
+    el.dispatchEvent(pev('pointerup', x1, y1));
+    return { x0: x0, y0: y0 };
+  }
+  function tap(el) {
+    const r = el.getBoundingClientRect();
+    el.dispatchEvent(pev('pointerdown', r.left + r.width / 2, r.top + r.height / 2));
+    el.dispatchEvent(pev('pointerup', r.left + r.width / 2, r.top + r.height / 2));
+  }
+  const R = (el) => el.getBoundingClientRect();
+  function inView(r, name, pad) {
+    const p = pad || 0, vw = window.innerWidth, vh = window.innerHeight;
+    const bad = [];
+    if (r.left < -p) bad.push('left=' + r.left.toFixed(1));
+    if (r.top < -p) bad.push('top=' + r.top.toFixed(1));
+    if (r.right > vw + p) bad.push('right=' + r.right.toFixed(1) + '>vw');
+    if (r.bottom > vh + p) bad.push('bottom=' + r.bottom.toFixed(1) + '>vh');
+    ok(bad.length === 0, name, '[l ' + r.left.toFixed(0) + ' t ' + r.top.toFixed(0) + ' r ' + r.right.toFixed(0) + ' b ' + r.bottom.toFixed(0) + ']' + (bad.length ? ' ← ' + bad.join(',') : ''));
+  }
+
+  // 只认 DIV：script 元素的 textContent 是源码，夹具自己写了 /拉黑屏蔽 v/ 这个字面量，
+  // 不加 tagName 过滤会匹配到夹具脚本本身（踩过：断言句句 FAIL 但插件其实是对的）
+  function findFab() {
+    for (const n of document.body.children) if (n.tagName === 'DIV' && n.textContent && n.textContent.trim() === '🚫') return n;
+    return null;
+  }
+  function findPanel() {
+    for (const n of document.body.children) if (n.tagName === 'DIV' && /拉黑屏蔽 v/.test(n.textContent || '')) return n;
+    return null;
+  }
+
+  let tries = 0;
+  const wait = setInterval(function () {
+    const fab = findFab();
+    if (!fab) { if (++tries > 100) { log('插件没建出悬浮球（超时 10 秒）', 'bad'); fail++; render(); clearInterval(wait); } return; }
+    clearInterval(wait);
+    setTimeout(() => {
+      try { run(fab); }
+      catch (err) { log('run() 抛异常：' + (err && (err.stack || err.message) || err), 'bad'); fail++; render(); }
+    }, 300);                                  // 等 buildUi 里那次 keepInView / setTimeout 跑完
+  }, 100);
+
+  function run(fab) {
+    const panel = findPanel();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    log('夹具起动：视口 ' + vw + 'x' + vh + '，悬浮球 ' + JSON.stringify({ w: Math.round(R(fab).width), h: Math.round(R(fab).height) }));
+
+    /* 坐标换算诊断：钳制在视口坐标里做、写回 style 坐标，这个差值必须为 0（不为 0 就得靠补偿，夹具会看出来） */
+    log('  坐标差 rect.left−offsetLeft = ' + (R(fab).left - fab.offsetLeft).toFixed(2) + ' / rect.top−offsetTop = ' + (R(fab).top - fab.offsetTop).toFixed(2));
+
+    if (!panel) { log('  没有找到面板元素 —— 后面的面板用例会跳过', 'bad'); }
+
+    const FW = Math.round(R(fab).width), FH = Math.round(R(fab).height);
+    const expMaxL = vw - FW - 4, expMaxT = vh - FH - 4;
+
+    log('\n[1] 悬浮球：拖到四个方向之外');
+    dragTo(fab, -400, -400); inView(R(fab), '拖向左上角外 → 停在界内', 1);
+    ok(Math.round(R(fab).left) === 4 && Math.round(R(fab).top) === 4, '  左上应是 4,4', Math.round(R(fab).left) + ',' + Math.round(R(fab).top));
+    dragTo(fab, vw + 400, vh + 400); inView(R(fab), '拖向右下角外 → 停在界内', 1);
+    ok(Math.round(R(fab).left) === expMaxL && Math.round(R(fab).top) === expMaxT, '  右下应是 ' + expMaxL + ',' + expMaxT, Math.round(R(fab).left) + ',' + Math.round(R(fab).top));
+    dragTo(fab, vw + 400, -400); inView(R(fab), '拖向右上角外 → 停在界内', 1);
+    dragTo(fab, -400, vh + 400); inView(R(fab), '拖向左下角外 → 停在界内', 1);
+    dragTo(fab, vw / 2, vh / 2); inView(R(fab), '拖回中间 → 在界内', 1);
+
+    log('\n[2] 贴边的球还能点（热区没被裁掉）');
+    dragTo(fab, -400, -400);                                   // 先贴左上
+    tap(fab);
+    ok(panel && panel.style.display === 'flex', '球贴左上角时点击 → 面板打开', panel && panel.style.display);
+
+    if (panel) {
+      const title = panel.children[0];
+      log('\n[3] 面板：拖到四个方向之外（把手 = 标题栏）');
+      const PW = Math.round(R(panel).width), PH = Math.round(R(panel).height);
+      log('  面板 ' + PW + 'x' + PH);
+      dragTo(title, -400, -400); inView(R(panel), '面板拖向左上角外 → 停在界内', 1);
+      dragTo(title, vw + 400, vh + 400); inView(R(panel), '面板拖向右下角外 → 停在界内', 1);
+      ok(Math.round(R(panel).left) === vw - PW - 4, '  面板右下应是 ' + (vw - PW - 4), Math.round(R(panel).left));
+      dragTo(title, vw + 400, -400); inView(R(panel), '面板拖向右上角外 → 停在界内', 1);
+      dragTo(title, -400, vh + 400); inView(R(panel), '面板拖向左下角外 → 停在界内', 1);
+
+      log('\n[4] 面板位置被记住（存的必须是钳过的值）');
+      const saved = (window.__IIROSE_BLACKLIST__.store.conf || {}).panel;
+      const okSaved = saved && saved.left >= 4 && saved.left <= vw - PW - 4 && saved.top >= 4 && saved.top <= vh - PH - 4;
+      ok(!!okSaved, '存的位置在界内', JSON.stringify(saved));
+      panel.style.display = 'none';
+      tap(fab);
+      const after = R(panel);
+      inView(after, '关掉再开 → 面板仍在界内', 1);
+
+      log('\n[5] 越位自愈（模拟转屏/键盘弹出把元素挤出视口，再触发 resize）');
+      panel.style.left = '-800px'; panel.style.top = '-800px';
+      window.dispatchEvent(new Event('resize'));
+      const pr2 = R(panel);
+      ok(pr2.left >= -1 && pr2.top >= -1 && pr2.right <= vw + 1 && pr2.bottom <= vh + 1,
+        '面板越位 + resize → 回到界内', '[l ' + pr2.left.toFixed(0) + ' t ' + pr2.top.toFixed(0) + ']');
+      panel.style.display = 'none';
+    }
+
+    fab.style.left = '-800px'; fab.style.top = '-800px';
+    window.dispatchEvent(new Event('resize'));
+    const fr = R(fab);
+    const def = { left: Math.min(Math.max(4, vw - 60), Math.max(4, vw - FW - 4)), top: Math.min(Math.max(4, vh - 260), Math.max(4, vh - FH - 4)) };
+    ok(Math.abs(Math.round(fr.left) - def.left) <= 1 && Math.abs(Math.round(fr.top) - def.top) <= 1,
+      '球越位 + resize → 回默认位置（右下', '[实测 ' + Math.round(fr.left) + ',' + Math.round(fr.top) + ' 期望 ' + def.left + ',' + def.top + ']');
+
+    log('\n[6] 对照：钳制是不是真的在起作用（把钳制绕过，看拖出去会怎样）');
+    const oldRect = fab.getBoundingClientRect();
+    dragTo(fab, -400, -400);
+    const newRect = fab.getBoundingClientRect();
+    ok(newRect.left >= 0 && newRect.top >= 0 && !(newRect.left === oldRect.left && newRect.top === oldRect.top),
+      '拖动确实发生了且没有越界（不是"没动"造成的假绿）', 'before ' + Math.round(oldRect.left) + ',' + Math.round(oldRect.top) + ' after ' + Math.round(newRect.left) + ',' + Math.round(newRect.top));
+
+    render();
+  }
+})();
+</script>
+</body>
+</html>

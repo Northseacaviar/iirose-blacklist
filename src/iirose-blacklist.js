@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.7';
-  const VERSION_CODE = 27;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.8';
+  const VERSION_CODE = 28;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -1221,6 +1221,12 @@
     // 用 setPointerCapture 保证手指滑出元素后仍持续收到 move；用 touch-action:none 防止页面跟着滚。
     let sx = 0, sy = 0, ox = 0, oy = 0, moved = 0, dragging = false;
     let gid = 0, ended = -1, usingPointer = false;             // 一个手势只结算一次（指针 + 鼠标两套事件会各触发一遍）
+    // 边界钳制（v0.3.8，北海口径："别再丢出去看不见，要能操作，越位就拉回"）：
+    // 拖到页面边上就停住 —— 元素边界 = 所在文档的视口边界，不留溢出行外（贴边的 4px 内缩沿用
+    // clampToViewport，与初始摆放/自愈同一套口径，否则会出现"拖着贴着边、一 resize 又弹开 4px"）。
+    // 坐标系：钳制在视口坐标（getBoundingClientRect）里做，写回用 style 坐标（offsetLeft/Top）；
+    // 两者正常相等，但 offsetParent 不在原点时会有固定差值，不补掉的话按下的第一帧会跳一下。
+    let ew = 0, eh = 0, vdx = 0, vdy = 0;
     try { handle.style.touchAction = 'none'; } catch (_) { }
     const start = (e) => {
       if (e.pointerType === 'mouse' && e.button) return;      // 只认左键
@@ -1231,6 +1237,9 @@
       gid++; dragging = true; moved = 0;
       sx = e.clientX; sy = e.clientY;
       ox = node.offsetLeft; oy = node.offsetTop;
+      const r0 = node.getBoundingClientRect();
+      ew = r0.width || node.offsetWidth || 0; eh = r0.height || node.offsetHeight || 0;   // 本次手势按这个尺寸钳（面板高度随内容变）
+      vdx = r0.left - ox; vdy = r0.top - oy;                  // 视口坐标 − style 坐标
       try { if (e.pointerId !== undefined && handle.setPointerCapture) handle.setPointerCapture(e.pointerId); } catch (_) { }
       if (e.cancelable) e.preventDefault();
     };
@@ -1238,7 +1247,12 @@
       if (!dragging) return;
       const dx = e.clientX - sx, dy = e.clientY - sy;
       moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
-      if (moved > 3) { node.style.left = (ox + dx) + 'px'; node.style.top = (oy + dy) + 'px'; }
+      if (moved > 3) {
+        // 撞边即停（不重设基准 —— 北海选的方案 A：往外拖多远，往回拖就要走完那段空程）
+        const p = clampToViewport(ox + dx + vdx, oy + dy + vdy, ew, eh);
+        node.style.left = Math.round(p.left - vdx) + 'px';
+        node.style.top = Math.round(p.top - vdy) + 'px';
+      }
     };
     const end = () => {
       if (!dragging || ended === gid) return;                // 同一手势的 mouseup/pointerup 只认第一次
@@ -1588,14 +1602,19 @@
     function keepInView() {
       try {
         const r = fab.getBoundingClientRect();
-        const lost = !r.width || !r.height || r.right <= 2 || r.bottom <= 2 ||
-                     r.left >= (window.innerWidth || 0) - 2 || r.top >= (window.innerHeight || 0) - 2;
-        const p = lost ? defaultFabPos() : clampToViewport(r.left, r.top, r.width, r.height);
+        const vw = window.innerWidth || 0, vh = window.innerHeight || 0;
+        // 越位判定（v0.3.8，北海口径："越位就暴力拉回默认位置"）：只要有任一边探出视口，直接回默认右下角，
+        // 不做"钳到最近边界"的温柔处理。容忍 1px —— 坐标都四舍五入过，恰好贴边时会有亚像素误差。
+        const lost = !r.width || !r.height ||
+                     r.left < -1 || r.top < -1 || r.right > vw + 1 || r.bottom > vh + 1;
+        const p = lost ? defaultFabPos() : { left: Math.round(r.left), top: Math.round(r.top) };
         if (lost || p.left !== Math.round(r.left) || p.top !== Math.round(r.top)) {
           fab.style.left = p.left + 'px'; fab.style.top = p.top + 'px';
         }
       } catch (_) { }
       try {
+        // 面板比球大，窄视口下"回默认摆放"本身就可能仍然放不下（面板 330px 宽、视口可能更窄），
+        // 所以面板这条保留"钳回视口内"—— 保证看得见、点得到，不整块重摆（重摆会让面板突然跳到球旁边）。
         const pr = panel.getBoundingClientRect();
         if (panel.style.display !== 'none' && pr.width) {
           const p2 = clampToViewport(pr.left, pr.top, pr.width, pr.height);
