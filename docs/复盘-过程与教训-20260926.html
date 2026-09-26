@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>复盘 · iirose 拉黑插件「屏蔽信箱通知」（2026-09-26，128 分钟）</title>
+<style>
+  :root{--bg:#0f1115;--card:#181b22;--card2:#1f232c;--line:#2b313c;--fg:#e8ecf1;--dim:#98a2b3;--ok:#4ec9a0;--warn:#e2b155;--bad:#e06c75;--acc:#7aa2f7;--acc2:#bb9af7}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.75 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;padding:28px 20px 60px}
+  .wrap{max-width:1060px;margin:0 auto}
+  h1{font-size:21px;margin:0 0 6px}
+  h2{font-size:16px;margin:30px 0 10px;padding-left:9px;border-left:3px solid var(--acc)}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:18px}
+  .grid{display:grid;gap:12px}
+  .k4{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .kpi b{display:block;font-size:20px}
+  .kpi span{color:var(--dim);font-size:12px}
+  table{width:100%;border-collapse:collapse;font-size:13px;background:var(--card);border-radius:10px;overflow:hidden}
+  th,td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}
+  th{background:var(--card2);color:var(--dim);font-weight:500;font-size:12px;white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+  .card h3{margin:0 0 6px;font-size:14px}
+  .why{color:var(--dim);font-size:12.5px;margin:6px 0 0}
+  code{background:#11141a;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12px;color:#cbd5e1}
+  .bad{color:var(--bad)}.warn{color:var(--warn)}.ok{color:var(--ok)}
+  .two{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
+  .num{font-variant-numeric:tabular-nums}
+  .note{background:#141922;border:1px dashed var(--line);border-radius:10px;padding:12px 14px;color:var(--dim);font-size:13px}
+  .foot{margin-top:26px;color:var(--dim);font-size:12px}
+  ul{margin:6px 0 0 18px;padding:0}li{margin:3px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>复盘：新增「屏蔽信箱通知」这 128 分钟</h1>
+  <div class="sub">iirose-blacklist · 2026-09-26 09:54 → 12:02（北京时间）· 版本 v0.3.0 → v0.3.1 → v0.3.2<br>
+  数据来源：<code>state.db</code> 消息时间戳逐条相减（会话 <code>20260926_095331_b0ab57</code>）；代码改动量取自 git；本页可与《时间去哪了》互为参照</div>
+
+  <div class="grid k4">
+    <div class="kpi"><b class="num">128 分</b><span>全程墙钟</span></div>
+    <div class="kpi"><b class="num">3 个版本</b><span>v0.3.0 功能 / v0.3.1 审查修 / v0.3.2 拆头像判据</span></div>
+    <div class="kpi"><b class="num">56 + 54 + 3</b><span>核心单测 / 联调 / 边界页，全绿</span></div>
+    <div class="kpi"><b class="num">$1.5943</b><span>项目累计估算花费（含审查子 agent）</span></div>
+  </div>
+
+  <h2>一句话结论</h2>
+  <div class="note">
+    功能交付没问题（协议层丢帧 + 界面层隐藏 + 转账永不丢 + 公告不动，全部有测试与 CDN 复核）；
+    但**过程质量不合格**：128 分钟里只有约 56% 是"计划内产出"，约 23% 烧在测试环境上、约 15 分钟是**返工**（头像判据建完又拆、探针 v3 白写），
+    其中 W22 死磕的 10.7 分钟是**我自己刚立的原则自己破**。下面逐条认账，并给出可执行的改法。
+  </div>
+
+  <h2>时间结构（两段）</h2>
+  <table>
+    <tr><th>阶段</th><th>时段</th><th>时长</th><th>内容</th></tr>
+    <tr><td>主体</td><td>09:54–11:45</td><td class="num">111 分</td><td>需求对齐 → 摸信箱协议/DOM（含探针 v1/v2）→ 实现 9 分 → 自测联调 → W22 死磕 → 发版 → 审查 4 处修复</td></tr>
+    <tr><td>收尾</td><td>11:45–12:02</td><td class="num">17 分</td><td>v0.3.1 修 4 条小问题（4.4 分）→ 拍板"只按名字"、v0.3.2 整块拆头像判据（4.6+2.8 分）→ 误报排查（2.8 分）→ 沉淀（0.6 分）</td></tr>
+  </table>
+
+  <h2>做错的五件事（按代价排序）</h2>
+  <div class="two">
+    <div class="card">
+      <h3 class="bad">① W22 死磕 10.7 分 —— 破了自己刚立的原则</h3>
+      <p class="why">上午你刚让我把"对功能实现无重大影响、排查成本高的问题，交付后再查"写进记忆；下午我就为一条旧用例偶发红，跑了 4 次浏览器往返 + 1 次 155 秒空等。事后证明它确实无关（基线 A/B 已证明 src 清白）。</p>
+      <p class="why"><b>改法</b>：报"偶发红"时先记一行"待查+证据到哪一步"就往下走；只有当它挡住验收路径才升级为必修。</p>
+    </div>
+    <div class="card">
+      <h3 class="bad">② 测试环境烧掉约 26 分（23%）</h3>
+      <p class="why">症状：harness 卡在 50/54 数分钟、页面加载变 <code>chrome-error://</code>、CDP 约 110 秒必断且守护进程重建浏览器丢结果。</p>
+      <p class="why">根因三条：标签页 <code>document.hidden=true</code> 被 Chrome 节流（切前台 20 秒跑完）/ CDP 会话寿命 110 秒 &lt; 整套 120 秒 / <code>:8098</code> 两个僵尸监听进程。<b>其中至少 15 分是"没先做环境自检"造成的</b>。</p>
+      <p class="why"><b>改法</b>：以后动手前先跑一次"环境自检"——<code>file://</code> 开新会话跑 harness，28 秒出结果就说明环境可用；卡住先看 <code>document.hidden</code> 和端口，再怀疑代码（已写进 skill）。</p>
+    </div>
+    <div class="card">
+      <h3 class="warn">③ 返工约 15 分：判据建完又拆</h3>
+      <p class="why">头像判据（<code>avatarKey</code> + 名单头像快照 + DOM 头像解析 + 5 条用例）先建成"名字 OR 头像"，一小时后按你拍板整块拆除；为它写的探针 v3 取证三项也因此白做。</p>
+      <p class="why"><b>根因</b>：顺序错了 —— 判据依赖站点数据形态（两种帧里头像是否同形、预置头像是否共用）时，应该**先拿真机证据，再实现判据**，而不是"先建成 OR 判据、再补取证"。</p>
+      <p class="why"><b>改法</b>：凡是"认人/去重/匹配"这类判据，动手前先列一张"判据依赖的外部事实"清单，逐条标上证据来源；拿不到证据的先按最保守判据（这里=只按名字）实现。</p>
+    </div>
+    <div class="card">
+      <h3 class="warn">④ 探针 v1 自身 bug 返工约 10 分</h3>
+      <p class="why">只读 <code>localStorage</code>（官方 settings 形态下名单不在那儿）→ 打到 0 人；存盘用的 <code>&lt;a&gt;</code> 节点触发自己的 MutationObserver，5 次配额被自己烧光。</p>
+      <p class="why"><b>改法</b>：交真机探针前，先在本地用最小夹具自测一遍（拿假 store + 假 DOM 跑通），再让他人操作。</p>
+    </div>
+    <div class="card">
+      <h3 class="warn">⑤ 交付说明没把开关语义说到显眼处</h3>
+      <p class="why">你按旧口径预期"拉黑=清历史"，实际你勾着「保留历史」，于是报了"拉黑不能屏蔽群聊历史消息"。代码没坏（今天那条链一行没动、四条用例全绿），但**让你花时间去报一次假 bug，说明我的交付说明有责任**。</p>
+      <p class="why"><b>改法</b>：涉及开关的功能，交付说明里要有一句"这个开关现在是什么状态、开/关分别会发生什么"；面板状态行也把当前语义常显出来（我提议过、你说不用，先记着）。</p>
+    </div>
+  </div>
+
+  <h2>做对的五件事（这些保留）</h2>
+  <div class="two">
+    <div class="card">
+      <h3 class="ok">① 派独立只读审查，抓出 4 处真 bug</h3>
+      <p class="why">其中一条是<b>违反你定的红线</b>：站级公告文本含 4 个 <code>&gt;</code> 时会被切成 7 段、恰好落成"点赞记录"而整条丢弃。审查与我并行，没占我的时间。</p>
+    </div>
+    <div class="card">
+      <h3 class="ok">② 判"我是不是改坏了"用基线 A/B，不靠猜</h3>
+      <p class="why">用 <code>git archive</code> 取上一版做基线：基线 harness 49/49、基线 harness + 新 src 49/49 ⇒ 证明新 src 清白，避免为了自证去乱改代码。</p>
+    </div>
+    <div class="card">
+      <h3 class="ok">③ 每次发版都读回比对</h3>
+      <p class="why">CDN 无 ref 地址的 <code>x-jsd-version</code>、<code>@v0.3.x</code> 下载包 md5 与本地发布件逐一比对（v0.3.0/0.3.1/0.3.2 三次都一致），不是"推上去就算"。</p>
+    </div>
+    <div class="card">
+      <h3 class="ok">④ 报 bug 先证明"那条链今天动没动"</h3>
+      <p class="why">这次用 <code>git diff v0.2.6..HEAD</code> 证明消息区容器/行识别/uid 提取一行未动，5 分钟内锁定是你的开关状态，没有乱改代码。顺序已写进 skill：<b>先状态、后代码</b>。</p>
+    </div>
+    <div class="card">
+      <h3 class="ok">⑤ 转账永不丢帧这条守住了</h3>
+      <p class="why">"保钱优先"是你拍板的；协议层只丢点赞/关注/点踩，转账只在界面层隐藏，混合帧里也只丢该丢的那条，审核与联调双重确认。</p>
+    </div>
+  </div>
+
+  <h2>口径变更账（这一轮改了两次）</h2>
+  <table>
+    <tr><th>时间</th><th>判据</th><th>为什么变</th><th>代价</th></tr>
+    <tr><td>09:54–10:26</td><td>名字 <b>OR</b> 头像（原型）</td><td>信箱帧/卡片里没有 uid，只有名字与头像链接；考虑"改名/换头像"两种逃逸</td><td>—</td></tr>
+    <tr><td>11:49（你拍板）</td><td><b>只按名字</b></td><td>站点预置卡通头像（六位数 id）可能多用户共用 → 按头像会误伤无关路人；宁可漏拦不误伤</td><td>头像判据代码 + 5 条用例 + 探针 v3 取证项作废，约 15 分返工</td></tr>
+  </table>
+  <div class="note" style="margin-top:10px">
+    <b>教训（最值钱的一条）</b>：讲"逃逸"时我给了两个判据，却没有同步给出它们的<b>代价与证据缺口</b>；如果当时就说清"头像判据的前提未经真机取证、且共用头像会误伤路人"，这一轮口径可能一开始就定成只按名字。
+    以后给方案：<b>每个判据旁边必须写"依赖的外部事实 + 证据来源 + 拿不到证据时的默认"</b>。
+  </div>
+
+  <h2>本次沉淀（写在哪儿了）</h2>
+  <table>
+    <tr><th>去向</th><th>内容</th></tr>
+    <tr><td>memory</td><td>排查取舍原则（非必要不排查、交付后再问）；授权调用已装技能；其余两条为既有条目更新</td></tr>
+    <tr><td>skill <code>vibecoding-workflow</code></td><td>① 项目开工要排工期 + 35% bug 缓冲（附实测校准：浏览器/真机类项目按 45%）② 浏览器测试页必须前台跑、别用固定 sleep 等周期任务 ③ 审查子 agent 要把报告落成项目文件、报告要逐条复核 ④ 报 bug 先查状态再查代码 ⑤ 探针/夹具先自测再交人</td></tr>
+    <tr><td>项目 README</td><td>需求口径（只按名字）、协议与 DOM 结构、验收表、自测跑法与环境三坑、版本流水（0.3.0/0.3.1/0.3.2）</td></tr>
+    <tr><td>测试资产</td><td>核心 56 项、联调 54 项（含 W50–W54）、新增独立边界页 <code>tests/mail-fresh.html</code>（专测"面板首次出现"这类一次性时序）</td></tr>
+    <tr><td>探针</td><td><code>docs/探针-信箱2.js</code>（v3，含头像取证，已无待办）、<code>docs/探针-历史清扫.js</code>（新，报"没清历史"时一贴定位）</td></tr>
+  </table>
+
+  <h2>若重来一次（可执行的四条）</h2>
+  <div class="card">
+    <ol style="margin:0 0 0 18px">
+      <li><b>开工先做 5 分钟环境自检</b>：<code>file://</code> 新会话跑一次 harness，28 秒出结果才算环境可用；否则先修环境再写码 —— 能省掉约 15 分。</li>
+      <li><b>判据类功能先取证后实现</b>：列"依赖的外部事实"清单，逐条标证据来源；无证据时用最保守判据（本例=只按名字）—— 能省掉约 15 分返工。</li>
+      <li><b>交付说明写清开关现状</b>：涉及开关的功能，明确"现在是开还是关、开/关各会发生什么"—— 能省掉这一次假 bug 的往返。</li>
+      <li><b>按 45% 缓冲排工期</b>：本类项目实测计划外支出 44%（真 bug 21% + 环境 23%），按 35% 排会超期。</li>
+    </ol>
+  </div>
+
+  <div class="foot">
+    口径：时间取自 <code>state.db</code> 的 <code>messages.timestamp</code>（同一会话相邻消息相减）；"环境死时间""返工"是人工按段落内容归类，依据写在每一段的工具直方图与用户发言里，可复算。
+    本页是 vibecoding 产物：需求与验收＝北海（@Northseacaviar）；分析与实现＝Corvin Hermes（基于 Nous Research 的 Hermes Agent）。
+  </div>
+</div>
+</body>
+</html>
