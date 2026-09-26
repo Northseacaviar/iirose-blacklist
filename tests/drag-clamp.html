@@ -90,12 +90,31 @@
     if (!fab) { if (++tries > 100) { log('插件没建出悬浮球（超时 10 秒）', 'bad'); fail++; render(); clearInterval(wait); } return; }
     clearInterval(wait);
     setTimeout(() => {
-      try { run(fab); }
-      catch (err) { log('run() 抛异常：' + (err && (err.stack || err.message) || err), 'bad'); fail++; render(); }
+      // run 是 async（[8] 要等 ResizeObserver 的异步回调）：异常会变成 rejected promise，try/catch 抓不到
+      Promise.resolve().then(() => run(fab))
+        .catch(err => { log('run() 抛异常：' + (err && (err.stack || err.message) || err), 'bad'); fail++; render(); });
     }, 300);                                  // 等 buildUi 里那次 keepInView / setTimeout 跑完
   }, 100);
 
-  function run(fab) {
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  // 期望的默认位置：与 src 里 defaultFabPos（窄屏分支 vw<520 用 vw-FAB-8/vh-108）同一套算法，
+  // 不在夹具里写死宽屏公式（独立审查 S1：写死会让窄视口假 FAIL）
+  function expectedDefault(w, h) {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let left = vw - 60, top = vh - 260;
+    if (vw < 520) { left = vw - w - 8; top = vh - 108; }
+    if (top < 8) top = vh - h - 60;
+    const cl = (t, lo, hi) => Math.min(Math.max(lo, t), Math.max(lo, hi));
+    return { left: cl(left, 4, vw - w - 4), top: cl(top, 4, vh - h - 4) };
+  }
+  // 视口放不下面板（330px 宽 + 8px 边距）时，面板越界是已声明取舍 —— 标 SKIP 而不是假红（审查 S2）
+  const PANEL_FITS = window.innerWidth >= 348;
+  function inViewPanel(r, name) {
+    if (!PANEL_FITS) { log('  SKIP  ' + name + '（视口宽 ' + window.innerWidth + ' < 348：面板固定 330px，放不下属已声明取舍）'); return; }
+    inView(r, name, 1);
+  }
+
+  async function run(fab) {
     const panel = findPanel();
     const vw = window.innerWidth, vh = window.innerHeight;
     log('夹具起动：视口 ' + vw + 'x' + vh + '，悬浮球 ' + JSON.stringify({ w: Math.round(R(fab).width), h: Math.round(R(fab).height) }));
@@ -127,11 +146,11 @@
       log('\n[3] 面板：拖到四个方向之外（把手 = 标题栏）');
       const PW = Math.round(R(panel).width), PH = Math.round(R(panel).height);
       log('  面板 ' + PW + 'x' + PH);
-      dragTo(title, -400, -400); inView(R(panel), '面板拖向左上角外 → 停在界内', 1);
-      dragTo(title, vw + 400, vh + 400); inView(R(panel), '面板拖向右下角外 → 停在界内', 1);
+      dragTo(title, -400, -400); inViewPanel(R(panel), '面板拖向左上角外 → 停在界内', 1);
+      dragTo(title, vw + 400, vh + 400); inViewPanel(R(panel), '面板拖向右下角外 → 停在界内', 1);
       ok(Math.round(R(panel).left) === vw - PW - 4, '  面板右下应是 ' + (vw - PW - 4), Math.round(R(panel).left));
-      dragTo(title, vw + 400, -400); inView(R(panel), '面板拖向右上角外 → 停在界内', 1);
-      dragTo(title, -400, vh + 400); inView(R(panel), '面板拖向左下角外 → 停在界内', 1);
+      dragTo(title, vw + 400, -400); inViewPanel(R(panel), '面板拖向右上角外 → 停在界内', 1);
+      dragTo(title, -400, vh + 400); inViewPanel(R(panel), '面板拖向左下角外 → 停在界内', 1);
 
       log('\n[4] 面板位置被记住（存的必须是钳过的值）');
       const saved = (window.__IIROSE_BLACKLIST__.store.conf || {}).panel;
@@ -140,7 +159,7 @@
       panel.style.display = 'none';
       tap(fab);
       const after = R(panel);
-      inView(after, '关掉再开 → 面板仍在界内', 1);
+      inViewPanel(after, '关掉再开 → 面板仍在界内');
 
       log('\n[5] 越位自愈（模拟转屏/键盘弹出把元素挤出视口，再触发 resize）');
       panel.style.left = '-800px'; panel.style.top = '-800px';
@@ -154,7 +173,7 @@
     fab.style.left = '-800px'; fab.style.top = '-800px';
     window.dispatchEvent(new Event('resize'));
     const fr = R(fab);
-    const def = { left: Math.min(Math.max(4, vw - 60), Math.max(4, vw - FW - 4)), top: Math.min(Math.max(4, vh - 260), Math.max(4, vh - FH - 4)) };
+    const def = expectedDefault(FW, FH);
     ok(Math.abs(Math.round(fr.left) - def.left) <= 1 && Math.abs(Math.round(fr.top) - def.top) <= 1,
       '球越位 + resize → 回默认位置（右下', '[实测 ' + Math.round(fr.left) + ',' + Math.round(fr.top) + ' 期望 ' + def.left + ',' + def.top + ']');
 
@@ -164,6 +183,37 @@
     const newRect = fab.getBoundingClientRect();
     ok(newRect.left >= 0 && newRect.top >= 0 && !(newRect.left === oldRect.left && newRect.top === oldRect.top),
       '拖动确实发生了且没有越界（不是"没动"造成的假绿）', 'before ' + Math.round(oldRect.left) + ',' + Math.round(oldRect.top) + ' after ' + Math.round(newRect.left) + ',' + Math.round(newRect.top));
+
+    log('\n[7] 局部越位（只有一部分探出视口）→ 必须回默认位置，不是钳回边界（独立审查 M1：夹具原来只测完全出界，锁不住本次判据）');
+    fab.style.left = '-30px'; fab.style.top = '120px';       // left=-30：球右半还在视口里
+    window.dispatchEvent(new Event('resize'));
+    const lr = R(fab);
+    const dfp = expectedDefault(FW, FH);
+    ok(Math.abs(Math.round(lr.left) - dfp.left) <= 1 && Math.abs(Math.round(lr.top) - dfp.top) <= 1,
+      '局部越位 → 落默认位置', '[实测 ' + Math.round(lr.left) + ',' + Math.round(lr.top) + ' 期望 ' + dfp.left + ',' + dfp.top + ']');
+
+    log('\n[8] 面板贴底后自己长高（新消息进名单）→ 应被钳回界内（独立审查 M2：长高不发 resize 事件）');
+    if (panel) {
+      panel.style.display = 'flex';
+      panel.style.height = '200px';
+      panel.style.left = '4px';
+      panel.style.top = (vh - 200 - 4) + 'px';
+      await sleep(100);
+      const grew0 = R(panel);
+      panel.style.height = '';                                // 放开限制 → 面板回到自然高度（比 200 高）
+      let got = null;
+      for (let i = 0; i < 30; i++) { await sleep(50); const rr = R(panel); if (rr.bottom <= vh + 1) { got = rr; break; } }
+      ok(!!got, '面板变高后自己回到界内（不靠 resize 事件）',
+        got ? '[高 ' + Math.round(grew0.height) + ' → ' + Math.round(got.height) + '，bottom ' + Math.round(got.bottom) + ' ≤ ' + vh + ']' : '[超时仍在界外 bottom ' + Math.round(R(panel).bottom) + ' > ' + vh + ']');
+      panel.style.display = 'none';
+    }
+
+    log('\n[9] 手势被系统打断（pointercancel）后不得留在界外');
+    const c0 = R(fab);
+    fab.dispatchEvent(pev('pointerdown', c0.left + 23, c0.top + 23));
+    fab.dispatchEvent(pev('pointermove', vw + 500, vh + 500));
+    fab.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 1, pointerType: 'mouse' }));
+    inView(R(fab), 'pointercancel 中断后仍在界内', 1);
 
     render();
   }
