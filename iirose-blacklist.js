@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.0';
-  const VERSION_CODE = 20;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.1';
+  const VERSION_CODE = 21;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -106,7 +106,7 @@
       // 用 null 原型：uid 恰好是 '__proto__'/'constructor' 时才会真的成为 own 键（普通对象会写到原型上，静默失效）
       uids: Object.create(null),      // uid -> { name, ts }  黑名单
       seen: Object.create(null),      // uid -> { name, ts }  最近见过的人（用于面板里按名字拉黑）
-      counters: { room: 0, priv: 0, danmaku: 0, dom: 0, abnormal: 0, err: 0 },
+      counters: { room: 0, priv: 0, danmaku: 0, dom: 0, mail: 0, abnormal: 0, err: 0 },
       conf: {
         confVersion: CONF_VERSION,   // 见顶部说明：用来区分"用户显式选择"与"上一版的默认值"
         debug: false,
@@ -307,6 +307,7 @@
 
   // 解析一条信箱记录；null = 形状不认识（残片/未知类型），调用方必须原样放行
   function mailRecordInfo(f) {
+    if (!f || typeof f.length !== 'number') return null;   // 手调 _diag 时传 null 不该抛
     if (f.length === 3) return { type: 'notice', name: '', avatar: '', blockable: false };
     if (f.length !== 7) return null;
     const marker = String(f[3] || '');
@@ -335,11 +336,12 @@
     s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, '');          // 去协议与域名
     const slash = s.lastIndexOf('/');
     if (slash >= 0) s = s.slice(slash + 1);                // 只留最后一段
-    return s.replace(/\.(jpg|jpeg|png|gif|webp|bmp)$/, ''); // 去扩展名
+    return s.replace(/\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|ico)$/, ''); // 去扩展名（白名单：.svg/.avif 也剥，否则与帧里的无扩展名形态判不等）
   }
 
   // 命中黑名单？名字（trim + 小写完全相等）或头像指纹任一命中即算
   function mailHit(store, name, avatar) {
+    if (!store || !store.uids) return null;                 // 手调 _diag 时传 null 不该抛
     const nm = String(name == null ? '' : name).trim().toLowerCase();
     const ak = avatarKey(avatar);
     if (!nm && !ak) return null;
@@ -1263,7 +1265,7 @@
       padding: '5px 10px', cursor: 'pointer', fontSize: '11px',
     }, '清空统计');
     onPress(resetBtn, () => {
-      store.counters = { room: 0, priv: 0, danmaku: 0, dom: 0, abnormal: 0, err: 0 }; saveStore(); refreshAll();
+      store.counters = { room: 0, priv: 0, danmaku: 0, dom: 0, mail: 0, abnormal: 0, err: 0 }; saveStore(); refreshAll();
       setStatus('统计已清零', '#68b26d');
     });
     foot.appendChild(copyBtn); foot.appendChild(resetBtn);

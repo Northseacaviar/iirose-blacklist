@@ -912,6 +912,8 @@ async function run() {
   const fail = results.filter((r) => !r.ok);
   const summary = { total: results.length, pass: results.length - fail.length, fail: fail.length, results };
   window.__RESULT__ = summary;
+  // 存一份到 localStorage：CDP 会话或标签页中途掉线时，重开本页即可读回结果（键名固定，别删）
+  try { localStorage.setItem('bl_harness_result', JSON.stringify({ when: new Date().toISOString(), href: location.href, summary: summary })); } catch (e) { }
   document.getElementById('out').textContent = JSON.stringify(summary, null, 1);
   document.getElementById('box').textContent = 'harness 完成：通过 ' + summary.pass + '/' + summary.total;
 }
