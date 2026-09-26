@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>iirose-blacklist 信箱"不弹面板"用例（站点行为按 messages.js 真实实现桩化）</title>
+<style>body{background:#111;color:#ddd;font:13px/1.6 Consolas,monospace;padding:10px}pre{white-space:pre-wrap}#box{margin-bottom:8px}</style>
+</head>
+<body>
+<div id="box">跑测试中…</div>
+<div id="msgholder"><div class="msgholderBox" id="msgHolder"></div></div>
+<div id="panelHolder"><div id="hidePanel">
+  <div id="leaveMsgHolder" class="panelHolderItem"><div class="contentItemContent"><div class="fullBox textColor" history=""><div class="boardLine" line="">历史消息</div></div></div></div>
+</div></div>
+<pre id="out"></pre>
+
+<script>
+/* ---- 站点桩：行为照 docs/reference/src/messages.js 的真实实现 ----
+ * 关键三处（v0.3.4 要吞掉的）：
+ *   '@*' 帧 → Objs.leaveMsgHolder.function.get(记录串)
+ *      · 逐条渲染 .cardTag + push 未读（Constant.NOTIFY.MAIL）
+ *      · panelAnimate(40, 1)  弹出信箱
+ *      · Utils.Resource.notiSound("mail")  提示音
+ *   转账（'$'）在站点侧是"金币变动"，会累加到 Variable.coin —— 这一句是"钱有没有被我们弄丢"的观测点。
+ */
+try { localStorage.removeItem('iirose_blacklist_v1'); } catch (e) {}
+window.__SITE__ = { pops: [], sounds: [], pushes: [], mail: [], coin: 0 };
+window.Variable = { coin: 0 };
+window.Constant = { NOTIFY: { PUBCHAT: 1, PRICHAT: 2, DUM: 3, MAIL: 4, SYS: 5 } };
+window.panelAnimate = function (type, show) { window.__SITE__.pops.push([type, show]); };
+window.Utils = { Resource: { notiSound: function (k) { window.__SITE__.sounds.push(k); } } };
+
+function siteCard(name, color) {
+  var card = document.createElement('div');
+  card.className = 'cardTag';
+  card.innerHTML = '<div class="cardTagBg"><div class="cardTagNew"></div></div><div class="cardTagI">'
+    + '<div class="cardTagName textColor">' + name + '</div><div class="cardTagTime"></div></div>';
+  return card;
+}
+
+window.Objs = {
+  homeHolder: { function: { push: function (t) { window.__SITE__.pushes.push(t); } } },
+  leaveMsgHolder: {
+    function: {
+      get: function (e, t) {
+        window.__SITE__.mail.push(e);
+        if (!e) return;
+        var content = document.querySelector('#leaveMsgHolder .contentItemContent .fullBox[history]');
+        e.split('<').forEach(function (rec) {
+          var p = rec.split('>');
+          if (p[3] && p[3].charAt(0) === "'" && p[3].charAt(1) === '$') {
+            window.Variable.coin = window.Variable.coin + Number(p[3].substr(2).split(' ')[0]);
+            window.__SITE__.coin = window.Variable.coin;
+          }
+          content.insertBefore(siteCard(p[0], p[6]), content.children[1] || null);
+          if (!t) window.Objs.homeHolder.function.push(window.Constant.NOTIFY.MAIL);
+        });
+        if (!t) { window.panelAnimate(40, 1); window.Utils.Resource.notiSound('mail'); }
+      }
+    }
+  }
+};
+
+window.uid = 'myown0000001a';
+window.__RECV = [];
+window.socket = { _onmessage: function (d) {
+    window.__RECV.push(d);
+    // 站点侧的帧分派（messages.js L13620）：'@*' → 信箱面板 get()
+    if (d.charAt(0) === '@' && d.charAt(1) === '*') window.Objs.leaveMsgHolder.function.get(d.substr(2));
+  }, _send: function () {}, send: function () {}, readyState: 1 };
+</script>
+<script src="../src/iirose-blacklist.js?pop=1"></script>
+<script>
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const results = [];
+function t(name, fn) { return Promise.resolve().then(fn).then(() => results.push({ name, ok: true }), (e) => results.push({ name, ok: false, err: String((e && e.message) || e) })); }
+function ok(v, m) { if (!v) throw new Error(m || '断言失败'); }
+function eq(a, b, m) { if (a !== b) throw new Error((m || 'eq') + ' 期望=' + JSON.stringify(b) + ' 实际=' + JSON.stringify(a)); }
+
+const A = window.__IIROSE_BLACKLIST__;
+const BLOCK = 'blockedge001a', NAME = '拉黑对象', OTHER = '别人的名字';
+const S = window.__SITE__;
+const rec = (name, avatar, marker, extra) =>
+  [name, avatar, '2', "'" + marker + (extra || ''), '', '1790390000', 'd28ad2'].join('>');
+const like = (name) => '@*' + rec(name, 'cartoon/900001', '*');
+const pay = (name, money) => '@*' + rec(name, 'cartoon/900001', '$', money + ' 谢谢');
+const two = (a, b) => '@*' + rec(a, 'cartoon/900001', '*') + '<' + rec(b, 'cartoon/900002', '*');
+const reset = () => { S.pops.length = 0; S.sounds.length = 0; S.pushes.length = 0; S.mail.length = 0; S.coin = 0; window.Variable.coin = 0; window.__RECV.length = 0; };
+const pop40 = () => S.pops.filter((p) => p[0] === 40 && p[1]).length;
+
+(async function () {
+  A.setEnabled(true);
+  A.setKeepHistory(true);
+  await sleep(300);
+  await t('前置：静默闸已装上（panelAnimate / notiSound / homePush 三处）', () => {
+    const d = A._diag.mailSilence();
+    eq(d.installed.panelAnimate, true, 'panelAnimate 没套上');
+    eq(d.installed.notiSound, true, 'notiSound 没套上');
+    eq(d.installed.homePush, true, 'homeHolder.push 没套上');
+  });
+
+  // ---- P1：被屏蔽者的转账 → 信箱不能弹、不响铃、不推未读；钱照算、卡片进 DOM 后被隐 ----
+  await t('P1 被屏蔽者转账：不弹面板 / 不响铃 / 不推未读；站点照旧收到记录（钱不丢）', async () => {
+    A.block(BLOCK, NAME);
+    await sleep(300);
+    A.setKeepHistory(true);
+    reset();
+    window.socket._onmessage(pay(NAME, 3));
+    await sleep(400);
+    eq(pop40(), 0, '信箱被弹出来了（panelAnimate(40,1) 没被吞）');
+    eq(S.sounds.length, 0, '响了提示音');
+    eq(S.pushes.length, 0, '推了未读通知');
+    eq(S.mail.length, 1, '站点压根没收到记录 —— 转账帧不该被丢');
+    ok(S.mail[0].indexOf(NAME) >= 0, '传给站点的记录里没有这个人');
+    eq(S.coin, 3, '钱没进站点账（Variable.coin 没累加）');
+    eq(A._diag.mailSilence().installed.panelAnimate, true, '')
+    const card = document.querySelector('#leaveMsgHolder .cardTag');
+    ok(card, '卡片没进 DOM');
+    eq(card.style.display, 'none', '卡片没被隐');
+    A.unblock(BLOCK);
+    document.querySelectorAll('#leaveMsgHolder .cardTag').forEach((c) => c.remove());
+    await sleep(200);
+  });
+
+  // ---- P2：被屏蔽者的点赞 → 记录在协议层就丢了，站点连帧都收不到（原本就不会弹）----
+  await t('P2 被屏蔽者点赞：整帧被丢，站点收不到（也就不会弹）', async () => {
+    A.block(BLOCK, NAME);
+    await sleep(300);
+    reset();
+    window.socket._onmessage(like(NAME));
+    await sleep(300);
+    eq(window.__RECV.length, 0, '帧没被丢干净');
+    eq(S.mail.length, 0, '站点收到了不该收到的记录');
+    eq(pop40(), 0, '弹了面板');
+    A.unblock(BLOCK);
+    await sleep(200);
+  });
+
+  // ---- P3：别人的点赞 → 一切照旧（弹面板、响铃、推未读、卡片不隐）----
+  await t('P3 别人的信箱通知：照旧弹面板 + 响铃 + 推未读（零影响）', async () => {
+    await sleep(200);
+    reset();
+    window.socket._onmessage(like(OTHER));
+    await sleep(400);
+    eq(pop40(), 1, '别人的通知没能弹出信箱（被静默闸误吞）');
+    eq(S.sounds.length, 1, '别人的通知没响铃');
+    eq(S.pushes.length, 1, '别人的通知没推未读');
+    eq(window.__RECV.length, 1, '别人的帧没透传');
+    const card = document.querySelector('#leaveMsgHolder .cardTag');
+    ok(card && card.style.display !== 'none', '别人的卡片被隐了（误伤）');
+    document.querySelectorAll('#leaveMsgHolder .cardTag').forEach((c) => c.remove());
+  });
+
+  // ---- P4：混合帧（被屏蔽者 + 别人）→ 该弹就要弹（别人的通知不能被吞）----
+  await t('P4 混合帧里有别人的通知：照旧弹面板', async () => {
+    A.block(BLOCK, NAME);
+    await sleep(300);
+    A.setKeepHistory(true);
+    reset();
+    window.socket._onmessage(two(NAME, OTHER));
+    await sleep(400);
+    eq(pop40(), 1, '有别人通知时信箱没弹出来（闸开过头）');
+    eq(S.sounds.length, 1, '有别人通知时没响铃');
+    A.unblock(BLOCK);
+    document.querySelectorAll('#leaveMsgHolder .cardTag').forEach((c) => c.remove());
+    await sleep(300);
+  });
+
+  // ---- P5：用户自己点信箱（闸关着）→ 正常弹；闸刚开时最多连吞一次，第二次点击照常 ----
+  await t('P5 用户自己点开信箱不受影响（第二次点击一定生效）', async () => {
+    await sleep(700);                       // 等上一次的闸过期
+    reset();
+    window.panelAnimate(40, 1);             // 模拟用户点「信箱」
+    eq(pop40(), 1, '闸关着还吞了用户自己的点击');
+    reset();
+    A.block(BLOCK, NAME);
+    await sleep(300);
+    A.setKeepHistory(true);
+    window.socket._onmessage(pay(NAME, 1)); // 先来一条被屏蔽者的转账（开闸）
+    await sleep(30);
+    window.panelAnimate(40, 1);             // 用户紧接着点一下（窗内第一次：按口径吞）
+    window.panelAnimate(40, 1);             // 再点一下（不吞）
+    eq(pop40(), 2, '闸内该吞掉"帧那一下"，用户自己的两次点击都该生效（吞的总数=1）');
+    A.unblock(BLOCK);
+    await sleep(700);
+    reset();
+    window.panelAnimate(40, 1);
+    eq(pop40(), 1, '闸过期后仍吞了弹面板');
+  });
+
+  const fail = results.filter((r) => !r.ok);
+  const summary = { total: results.length, pass: results.length - fail.length, fail: fail.length, results };
+  window.__RESULT__ = summary;
+  document.getElementById('out').textContent = JSON.stringify(summary, null, 1);
+  document.getElementById('box').textContent = fail.length
+    ? ('信箱弹面板用例：失败 ' + fail.length + '/' + summary.total)
+    : ('信箱弹面板用例：通过 ' + summary.pass + '/' + summary.total);
+})();
+</script>
+</body>
+</html>
