@@ -100,7 +100,7 @@ start.bat 本地托管（自定义 JS 注入调试用）
 | `packageName` = 作者名.应用名（英文数字下划线） | `Northseacaviar.iiroseBlacklist` |
 | `package` 元信息 | 全 12 项都提供（源码 `PKG_META`）；其中 `privacy` 公示：**在本地读取聊天/私聊消息内容用于比对黑名单，不修改、不上报、不转发** |
 | **不许私自写 localStorage** | 检测到官方运行时 → 走 `instance.settings/removeSettings`（`#region STORAGE` 适配层）；没有运行时 → 才退回 localStorage，且自检行写明「存储：本地注入（localStorage）」 |
-| `versionName` + `versionCode`（数字，每次发布递增 1） | `VERSION`（字符串）与 `VERSION_CODE`（数字，当前 29）—— **发版两处都要改** |
+| `versionName` + `versionCode`（数字，每次发布递增 1） | `VERSION`（字符串）与 `VERSION_CODE`（数字，当前 30）—— **发版两处都要改** |
 | `outerLoad` 公示外部引用 | 空串（单文件、零依赖，不引任何外部 js/css/html） |
 | `runAt` | `allReady`（规范推荐默认；收包钩子有 5 秒自愈，晚挂上也不漏） |
 | `device` | `*` |
@@ -144,11 +144,11 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 | **loader（推荐）** | 什么都不用做，**刷新页面**即最新版（F5；手机下拉刷新/切页也行）。loader v2 会**并行取回各候选地址、比出版本最高的那份再注入**，所以「CDN 分支缓存还停在旧版」这种局面不会再让用户拿到旧代码 |
 | 直连 `iirose-blacklist.js` | ① 把地址里 `?v=` 的数字改大（新数字 = 新 URL，浏览器必须重新下载，CDN 忽略查询串照常返回最新文件）② 在站点的自定义 JS 里**重新粘贴一次**（地址存在 `extJs` 里，不重粘永远只认旧地址） |
 | 本地调试（`start.bat`） | 直接 `Ctrl+F5`，本地不经 CDN，没有 7 天缓存 |
-| 想固定某个版本 | 用 tag 地址：`.../iirose-blacklist@v0.3.10/loader.js`（或主脚本 `@v0.3.10/iirose-blacklist.js`）|
+| 想固定某个版本 | 用 tag 地址：`.../iirose-blacklist@v0.3.11/loader.js`（或主脚本 `@v0.3.11/iirose-blacklist.js`）|
 
 **还有一道是浏览器自己的缓存（7 天）**：jsdelivr 给的是 `Cache-Control: public, max-age=604800`，所以 **loader 自己那个 URL 也会被浏览器缓存 7 天** —— CDN 上已经是新版，你的浏览器照样把旧的直接拿出来用。loader 只能给**主脚本**加 `?t=` 绕缓存，它没法给自己的地址加。→ **要立刻换掉 loader，唯一办法是换地址**（钉 tag，或在地址后随便加个查询串如 `?v=2`），让浏览器当成新 URL 重新下载。
 
-**刷新了还是不生效？把地址临时钉到本次 tag**：`…iirose-blacklist@v0.3.10/loader.js` —— tag 地址不可变，CDN 上第一次请求必然回源，**不可能**给你旧文件（分支地址 `@main` / 不带 ref 的地址都可能被缓存最多 **12 小时**，且清缓存接口不保证能立刻刷掉分支解析；`node tools/purge-cdn.js` **只管得了 CF + FY 两家主机**，gcore 的 `@main` 陈旧且 purge 接口不覆盖）。
+**刷新了还是不生效？把地址临时钉到本次 tag**：`…iirose-blacklist@v0.3.11/loader.js` —— tag 地址不可变，CDN 上第一次请求必然回源，**不可能**给你旧文件（分支地址 `@main` / 不带 ref 的地址都可能被缓存最多 **12 小时**，且清缓存接口不保证能立刻刷掉分支解析；`node tools/purge-cdn.js` **只管得了 CF + FY 两家主机**，gcore 的 `@main` 陈旧且 purge 接口不覆盖）。
 
 确认更新成功：面板标题显示版本号；或控制台 `__IIROSE_BLACKLIST__.version`；面板自检行还会写明「存储：官方 settings / 本地注入（localStorage）」。
 
@@ -156,7 +156,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 
 1. 本地调试：双击 `start.bat`（起 127.0.0.1:8770），站点内 console → `js -s` 开启 → `js` 粘贴 `http://127.0.0.1:8770/src/iirose-blacklist.js`（`extJs` 支持空格分隔多个地址，可与点歌插件同时注入）
 2. 朋友用：注入 loader 那一行（见上面「给朋友用」）
-3. 界面：右下角悬浮球 🚫 → 面板（拉黑/解除拉黑全在这里）。面板开关：**启用屏蔽 / 拉黑时保留他的历史消息 / 清除历史点播卡片 / 隐藏私聊会话条目 / 调试日志**。勾「调试日志」后底部出现「**诊断**」按钮 → 开 760px 大字窗口（可滚动、可选中、带「复制全文」）；形状不认识时逐格打印 `[0] [1] [2] …`。
+3. 界面：右下角悬浮球 🚫 → 面板（拉黑/解除拉黑全在这里）。面板开关：**启用屏蔽 / 拉黑时保留他的历史消息 / 清除历史点播卡片 / 隐藏私聊会话条目 / 调试日志**。勾「调试日志」后面板内出现诊断文本块，**点它**开 760px 大字窗口（可滚动、可选中、带「复制全文」与「关闭」；窗口内按钮 v0.3.10 起真的点得动）；形状不认识时逐格打印 `[0] [1] [2] …`。面板底部的「诊断」按钮自 v0.3.10 起默认隐藏（平时用不到，代码保留）。
 4. 自测：`node tests/core.test.js`（核心逻辑 **56** 项）、浏览器打开 `tests/harness.html`（联调 **54** 项）、`tests/mail-pop.html`（信箱「不弹面板」**8** 项）、`tests/mail-fresh.html`（信箱边界 **4** 项）、`tests/official-mode.html`（官方形态 **23** 项）、`tests/migration.html`（老配置迁移 **7** 项）、`tests/loader-test.html`（loader 本地 **6** 项）、`tests/loader-stub.html`（loader v2 选版逻辑 **16** 项，桩造四种「谁新谁旧」组合）、`tests/loader-cdn.html`（loader 走真 CDN = 朋友路径）、`tests/probe3-selftest.html`（信箱真帧探针 11 项）、`tests/probe3-selftest-b.html`（探针先跑、插件后到的顺序 6 项）
 5. **发版最后一步（别漏）：`node tools/purge-cdn.js`** —— 清 jsdelivr 的 `@main`／无 ref 缓存并逐主机复核版本，落后就退出码 1。**不跑它，用户那边可能继续拿旧版最多 12 小时。**
    - **推荐跑法：用 `file://` 在一个全新浏览器会话里打开**（例：`file:///D:/iirose-blacklist/tests/harness.html`）—— 实测 28 秒跑完、且不掉线。**别用 `http://127.0.0.1:端口` 长跑**：CDP 会话约 110 秒必断，守护进程随后重建浏览器，跑到一半的结果全丢；harness 会把结果写进 localStorage 键 `bl_harness_result`，掉线后重开同源页面还能读回。
@@ -203,8 +203,8 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/mobile-probe.js
 本项目的 token 与花费由脚本直查本机 Hermes 会话库生成（只读），明细见 [`docs/成本账.md`](docs/成本账.md)。
 
 <!-- COST:BEGIN 由 tools/token-report.py --readme 生成，别手改 -->
-- 截至 2026-09-26 16:02（北京时间）：估算花费 **$2.1346**（≈15 元人民币）· 消息 1,401 · 工具调用 719
-- 结构：主开发会话 $1.77 ／ 子 agent 独立审查 $0.26 ／ 部分相关折算 $0.10（明细见 [`docs/成本账.md`](docs/成本账.md)）
+- 截至 2026-09-26 16:05（北京时间）：估算花费 **$2.1481**（≈15 元人民币）· 消息 1,430 · 工具调用 734
+- 结构：主开发会话 $1.78 ／ 子 agent 独立审查 $0.26 ／ 部分相关折算 $0.10（明细见 [`docs/成本账.md`](docs/成本账.md)）
 - 口径：`estimated_cost_usd` 是**估算不是账单**；`reasoning_tokens` 通常已含在输出口径里；缓存读占 ~98%，所以「总 token 近亿」不等于贵。
 - 复现：`python tools/token-report.py`（屏幕）· `--doc docs/成本账.md`（重写成本账）· `--readme README.md`（刷新本段）
 <!-- COST:END -->
@@ -230,6 +230,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/mobile-probe.js
 | `v0.3.5` | 插件 v0.3.4：被屏蔽者来信箱不弹面板/不响铃/不推未读（界面层 600ms 静默闸，帧仍照旧透传） |
 | `v0.3.6` | 插件 v0.3.5：面板内置「信箱诊断」 |
 | `v0.3.7` | 插件 v0.3.6：诊断改 760px 大字窗口（可滚动、可选中、可复制全文） |
+| `v0.3.11` | 插件 v0.3.10：诊断大字窗口「关不掉」修复 —— 原来在**捕获阶段**对 pointerdown/click 调 stopPropagation，会把窗口内的「关闭/复制全文/刷新」一起掐死（北海真机）；改成冒泡阶段拦。面板底部「诊断」入口默认隐藏 |
 | `v0.3.10` | 插件 v0.3.9：独立审查（M1/M2/S5/S6/S7）修正 —— 拖动/点击阈值统一（原来位移 4px 时既挪球又开面板）、尺寸每帧现量 + 落盘前再钳（面板底部不再探出）、面板自己长高靠 ResizeObserver 回到界内、视口压矮时重算面板高度上限 |
 | `v0.3.9` | 插件 v0.3.8：**悬浮窗拖不出页面** —— 拖动实时钳到视口边界（撞边即停、不重设基准），松手记住的是钳过的位置；越位（转屏/键盘弹出把元素挤出视口）时球直接拉回默认右下角 |
 | `v0.3.8` | 插件 v0.3.7：形状守卫改成**按特征找、不认死下标** —— 真机转账帧只有 6 格、标记不在第 4 格，原先按死下标会把它判成「形状不认识」而放行（信箱照弹） |

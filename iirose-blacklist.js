@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.9';
-  const VERSION_CODE = 29;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.10';
+  const VERSION_CODE = 30;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -1422,7 +1422,7 @@
     function refreshMailDiag() {
       if (!store.conf.debug) { mailDiagBox.style.display = 'none'; return; }
       mailDiagBox.style.display = 'block';
-      mailDiagBox.textContent = mailDiagText() + '\n（点这里 / 点底部「诊断」开大字窗口，可截图可复制）';
+      mailDiagBox.textContent = mailDiagText() + '\n（点这里开大字窗口，可截图可复制）';
     }
 
     // 复用到剪贴板：navigator.clipboard 优先，失败退回临时 textarea（Promise 的拒绝 try/catch 抓不到，必须显式接）
@@ -1477,9 +1477,12 @@
         lineHeight: '1.7', userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text', color: '#cfe0f0',
       });
       box.appendChild(head); box.appendChild(pre);
-      // 站点的手势/面板拖拽会吃掉选择：捕获阶段全部拦在这里，别往外冒
+      // 站点的手势/面板拖拽会吃掉选择：这些事件停在这里别往外冒。
+      // 必须只在【冒泡阶段】停 —— 捕获阶段 stopPropagation 会连自己的后代一起掐死，
+      // 表现就是窗口里的「关闭 / 复制全文 / 刷新」全点不动、诊断窗口关不掉（2026-09-26 北海真机）。
+      // 站点若在 document 捕获阶段处理，本拦截本来就来不及（document 捕获比这里更早），冒泡拦截才是有效的那道。
       ['pointerdown', 'mousedown', 'click', 'dblclick', 'touchstart', 'mouseup'].forEach((ev) => {
-        box.addEventListener(ev, (e) => { e.stopPropagation(); }, true);
+        box.addEventListener(ev, (e) => { e.stopPropagation(); });
       });
       onPress(reloadBtn, () => { pre.textContent = mailDiagText(); });
       document.body.appendChild(box);
@@ -1503,9 +1506,11 @@
         () => setStatus('已复制 ' + lines.length + ' 条到剪贴板', '#68b26d'),
         () => setStatus('复制失败（浏览器不给权限）：名单已打到控制台，可手动复制', '#ec4141'));
     });
+    // 「诊断」入口默认隐藏（北海 2026-09-26：平时用不到）。代码保留 —— 排查时改回 display 即可；
+    // 要彻底删掉的话说一声。面板内的诊断文本块（调试日志开着时出现）仍然点得开大字窗口。
     const diagBtn = el('button', {
       background: '#2a2b33', color: '#bbb', border: '1px solid #444', borderRadius: '5px',
-      padding: '5px 10px', cursor: 'pointer', fontSize: '11px',
+      padding: '5px 10px', cursor: 'pointer', fontSize: '11px', display: 'none',
     }, '诊断');
     onPress(diagBtn, openDiag);
     const resetBtn = el('button', {
