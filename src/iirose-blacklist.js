@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.5';
-  const VERSION_CODE = 25;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.6';
+  const VERSION_CODE = 26;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -1365,17 +1365,83 @@
     const warn = el('div', { padding: '0 12px 6px', color: '#d0a04a', fontSize: '11px', display: 'none' });
     panel.appendChild(warn);
     // 信箱诊断（只在"调试日志"开着时显示）：帧原文 + 逐条判定 + 闸的动作 —— 真机排查用
+    // 面板只有 330px 宽，贴不下也难截图 —— 点它（或点底部「诊断」）开大字窗口
     const mailDiagBox = el('pre', {
-      margin: '0', padding: '6px 12px 8px', color: '#8fa0b5', fontSize: '10.5px', lineHeight: '1.5',
+      margin: '0', padding: '6px 12px 8px', color: '#8fa0b5', fontSize: '11px', lineHeight: '1.5',
       whiteSpace: 'pre-wrap', wordBreak: 'break-all', borderTop: '1px solid #2a2b33', display: 'none',
-      fontFamily: 'Consolas, Menlo, monospace', maxHeight: '160px', overflowY: 'auto',
+      fontFamily: 'Consolas, Menlo, monospace', maxHeight: '240px', overflowY: 'auto',
+      cursor: 'pointer', userSelect: 'text', WebkitUserSelect: 'text',
     });
     panel.appendChild(mailDiagBox);
     function refreshMailDiag() {
       if (!store.conf.debug) { mailDiagBox.style.display = 'none'; return; }
       mailDiagBox.style.display = 'block';
-      mailDiagBox.textContent = mailDiagText();
+      mailDiagBox.textContent = mailDiagText() + '\n（点这里 / 点底部「诊断」开大字窗口，可截图可复制）';
     }
+
+    // 复用到剪贴板：navigator.clipboard 优先，失败退回临时 textarea（Promise 的拒绝 try/catch 抓不到，必须显式接）
+    function copyToClipboard(text, okMsg, failMsg) {
+      const fallback = () => {
+        const ta = el('textarea', { position: 'fixed', top: '0', left: '0', opacity: '0' });
+        ta.value = text;
+        document.body.appendChild(ta);
+        let ok = false;
+        try { ta.select(); ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        if (ta.parentNode) ta.parentNode.removeChild(ta);
+        if (ok) okMsg(); else { log(text); failMsg(); }
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(okMsg, fallback);
+      } else fallback();
+    }
+
+    // 「信箱诊断」大字窗口：内容随清扫刷新，能选、能复制、适合截图
+    let diagOverlay = null, diagTimer = null;
+    function closeDiag() {
+      if (diagTimer) { clearInterval(diagTimer); diagTimer = null; }
+      if (diagOverlay && diagOverlay.parentNode) diagOverlay.parentNode.removeChild(diagOverlay);
+      diagOverlay = null;
+    }
+    function openDiag() {
+      if (diagOverlay) { closeDiag(); return; }
+      const box = el('div', {
+        position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
+        width: 'min(760px, 94vw)', height: 'min(80vh, 640px)', background: '#15161c', color: '#dfe6ee',
+        border: '1px solid #3a3d48', borderRadius: '10px', zIndex: String(Z + 10), display: 'flex',
+        flexDirection: 'column', boxShadow: '0 12px 48px rgba(0,0,0,.7)',
+        fontFamily: 'PingFang SC, Microsoft YaHei, sans-serif',
+      });
+      const head = el('div', { display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderBottom: '1px solid #2a2b33' });
+      head.appendChild(el('div', { flex: '1', fontSize: '13px', fontWeight: '700' }, '信箱诊断'));
+      const btnStyle = {
+        background: '#2a2b33', color: '#ccc', border: '1px solid #444', borderRadius: '5px',
+        padding: '5px 10px', cursor: 'pointer', fontSize: '11px', flexShrink: '0',
+      };
+      const copyDiagBtn = el('button', btnStyle, '复制全文');
+      onPress(copyDiagBtn, () => copyToClipboard(mailDiagText(),
+        () => setStatus('诊断已复制到剪贴板', '#68b26d'),
+        () => setStatus('复制失败（浏览器不给权限）：文本已打到控制台', '#ec4141')));
+      const reloadBtn = el('button', btnStyle, '刷新');
+      const closeBtn2 = el('button', btnStyle, '关闭');
+      onPress(closeBtn2, closeDiag);
+      head.appendChild(copyDiagBtn); head.appendChild(reloadBtn); head.appendChild(closeBtn2);
+      const pre = el('pre', {
+        margin: '0', padding: '12px 14px', flex: '1', overflow: 'auto', whiteSpace: 'pre-wrap',
+        wordBreak: 'break-all', fontFamily: 'Consolas, Menlo, monospace', fontSize: '13px',
+        lineHeight: '1.7', userSelect: 'text', WebkitUserSelect: 'text', cursor: 'text', color: '#cfe0f0',
+      });
+      box.appendChild(head); box.appendChild(pre);
+      // 站点的手势/面板拖拽会吃掉选择：捕获阶段全部拦在这里，别往外冒
+      ['pointerdown', 'mousedown', 'click', 'dblclick', 'touchstart', 'mouseup'].forEach((ev) => {
+        box.addEventListener(ev, (e) => { e.stopPropagation(); }, true);
+      });
+      onPress(reloadBtn, () => { pre.textContent = mailDiagText(); });
+      document.body.appendChild(box);
+      diagOverlay = box;
+      pre.textContent = mailDiagText();
+      diagTimer = setInterval(() => { if (diagOverlay) pre.textContent = mailDiagText(); }, 1000);
+    }
+    onPress(mailDiagBox, openDiag);
     const diagLine = el('div', { padding: '6px 12px', color: '#7f8794', fontSize: '11px', lineHeight: '1.5' }, '自检：面板打开后 1 秒自动跑');
     panel.appendChild(diagLine);
 
@@ -1387,24 +1453,15 @@
     onPress(copyBtn, () => {
       const lines = Object.keys(store.uids).map(u => u + '\t' + (store.uids[u].name || ''));
       if (!lines.length) { setStatus('名单为空，没什么可复制', '#d0a04a'); return; }
-      const text = lines.join('\n');
-      const okMsg = () => setStatus('已复制 ' + lines.length + ' 条到剪贴板', '#68b26d');
-      const fallback = () => {
-        // 用临时 textarea，别覆盖用户正在输入的搜索框
-        const ta = el('textarea', { position: 'fixed', top: '0', left: '0', opacity: '0' });
-        ta.value = text;
-        document.body.appendChild(ta);
-        let ok = false;
-        try { ta.select(); ok = document.execCommand('copy'); } catch (e) { ok = false; }
-        if (ta.parentNode) ta.parentNode.removeChild(ta);
-        if (ok) okMsg();
-        else { log(text); setStatus('复制失败（浏览器不给权限）：名单已打到控制台，可手动复制', '#ec4141'); }
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        // Promise 的拒绝 try/catch 抓不到，必须显式接失败分支
-        navigator.clipboard.writeText(text).then(okMsg, fallback);
-      } else fallback();
+      copyToClipboard(lines.join('\n'),
+        () => setStatus('已复制 ' + lines.length + ' 条到剪贴板', '#68b26d'),
+        () => setStatus('复制失败（浏览器不给权限）：名单已打到控制台，可手动复制', '#ec4141'));
     });
+    const diagBtn = el('button', {
+      background: '#2a2b33', color: '#bbb', border: '1px solid #444', borderRadius: '5px',
+      padding: '5px 10px', cursor: 'pointer', fontSize: '11px',
+    }, '诊断');
+    onPress(diagBtn, openDiag);
     const resetBtn = el('button', {
       background: '#2a2b33', color: '#bbb', border: '1px solid #444', borderRadius: '5px',
       padding: '5px 10px', cursor: 'pointer', fontSize: '11px',
@@ -1413,7 +1470,7 @@
       store.counters = { room: 0, priv: 0, danmaku: 0, dom: 0, mail: 0, abnormal: 0, err: 0 }; saveStore(); refreshAll();
       setStatus('统计已清零', '#68b26d');
     });
-    foot.appendChild(copyBtn); foot.appendChild(resetBtn);
+    foot.appendChild(copyBtn); foot.appendChild(diagBtn); foot.appendChild(resetBtn);
     panel.appendChild(foot);
 
     function row(uid, name, btnText, btnColor, onClick) {
