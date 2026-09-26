@@ -211,8 +211,8 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 本项目的 token 与花费由脚本直查本机 Hermes 会话库生成（只读），明细在 [`docs/成本账.md`](docs/成本账.md)。
 
 <!-- COST:BEGIN 由 tools/token-report.py --readme 生成，别手改 -->
-- 截至 2026-09-26 11:10（北京时间）：估算花费 **$1.4513**（≈10 元人民币）· 消息 687 · 工具调用 361
-- 结构：主开发会话 $1.24 ／ 子 agent 独立审查 $0.17 ／ 部分相关折算 $0.04（明细见 [`docs/成本账.md`](docs/成本账.md)）
+- 截至 2026-09-26 11:19（北京时间）：估算花费 **$1.4921**（≈11 元人民币）· 消息 755 · 工具调用 397
+- 结构：主开发会话 $1.28 ／ 子 agent 独立审查 $0.17 ／ 部分相关折算 $0.04（明细见 [`docs/成本账.md`](docs/成本账.md)）
 - 口径：`estimated_cost_usd` 是**估算不是账单**；`reasoning_tokens` 通常已含在输出口径里；缓存读占 ~98%，所以「总 token 近亿」不等于贵。
 - 复现：`python tools/token-report.py`（屏幕）· `--doc docs/成本账.md`（重写成本账）· `--readme README.md`（刷新本段）
 <!-- COST:END -->
