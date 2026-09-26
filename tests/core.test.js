@@ -229,17 +229,25 @@ t('信箱·房间公告文本里含 > 被切成 7 段时，不得被误拦（独
   eq(r.changed, false, '公告被改动了');
   eq(r.data, f);
 });
-t('信箱·7 字段形状复核：性别/时间戳/颜色任一不合规都算"认不出"（宁可漏拦不误伤）', () => {
+t('信箱·形状守卫（按特征找，不认死下标）：时间戳/颜色缺一不可，性别格不再要求', () => {
   const okRec = F.mailRec('甲', 'a.jpg', '*');
   eq(L.mailRecordInfo(okRec.split('>')).type, 'like');
   const bad = (i, v) => { const a = okRec.split('>'); a[i] = v; return L.mailRecordInfo(a); };
-  eq(bad(2, '9'), null, '性别');
-  eq(bad(2, ''), null, '性别空');
   eq(bad(5, 'abc'), null, '时间戳非数字');
   eq(bad(5, '17626130'), null, '时间戳 8 位（实现按 9~11 位放宽，故意留了余量）');
   eq(bad(6, 'zzzzzz'), null, '颜色非 hex');
   eq(bad(6, 'd28ad'), null, '颜色 5 位');
-  eq(JSON.stringify(bad(1, 'a.jpg')), JSON.stringify({ type: 'like', name: '甲', blockable: true }), '其它格不该被牵连');
+  eq(bad(2, '9') && bad(2, '9').type, 'like', '性别格不再是判据（真机转账帧压根没有这一格）');
+  eq(bad(1, 'a.jpg') && bad(1, 'a.jpg').type, 'like', '其它格不该被牵连');
+  // 真机帧（北海 2026-09-26 截图）：标记不在第 4 格、共 6 格 —— 必须认得出，且金额大的转账不丢
+  const real = "@*Night cruise>https://xc.null.red:8043/XCimg/img/save/2024/08/29/blob-1596976874#.jpg#e0>'$1>>1790402429>ffffef";
+  const info = L.mailRecordInfo(real.slice(2).split('>'));
+  eq(info && info.type, 'payment', '真机转账帧没认出来（闸就不会开 → 信箱照弹）');
+  eq(info && info.name, 'Night cruise', '名字格取错了');
+  eq(info && info.blockable, false, '转账必须不可丢（钱优先）');
+  // 5 格 / 9 格的边界：标记位在 1~5 格内都认；超过 9 格一律当不认识
+  eq(L.mailRecordInfo("甲>a>'*>1762613079>d28ad2".split('>')).type, 'like', '5 格变体（标记在第 3 格）');
+  eq(L.mailRecordInfo(['甲', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']), null, '10 格该当成不认识');
 });
 t('信箱·手调 _diag 时传 null/undefined 不该抛（审查 C5）', () => {
   eq(L.mailRecordInfo(null), null);

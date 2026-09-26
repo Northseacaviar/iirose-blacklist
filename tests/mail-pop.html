@@ -126,7 +126,40 @@ const pop40 = () => S.pops.filter((p) => p[0] === 40 && p[1]).length;
     await sleep(200);
   });
 
-  // ---- P2：被屏蔽者的点赞 → 记录在协议层就丢了，站点连帧都收不到（原本就不会弹）----
+  // ---- P7：真机帧（北海 2026-09-26 截图里那条转账）必须被认出来并吞掉弹面板 ----
+  // 与官方样本不同：标记不在第 4 格、格子数 6，头像是一整条 URL —— 旧的"按死下标"守卫把这条判成
+  // "形状不认识"直接放行，于是闸不开、信箱照弹（真机就是这个现象）。
+  await t('P7 真机转账帧（标记不在第 4 格）：必须认出类型=转账、不丢帧、吞掉弹面板', async () => {
+    const REAL = '@*Night cruise>https://xc.null.red:8043/XCimg/img/save/2024/08/29/blob-1596976874#.jpg#e0>'
+      + "'$1>>1790402429>ffffef";
+    A.block('blockedge7', 'Night cruise');
+    await sleep(300);
+    reset();
+    window.socket._onmessage(REAL);
+    await sleep(400);
+    eq(pop40(), 0, '真机帧没被认出（闸没开）→ 信箱又弹了');
+    eq(S.mail.length, 1, '真机转账帧被丢了 —— 转账记录绝不能丢（钱优先）');
+    ok(S.mail[0].indexOf('Night cruise') >= 0, '传给站点的记录里没有这个人');
+    const dt7 = A._diag.mailDiagText();
+    ok(/payment/.test(dt7), '诊断没把真机帧认成转账：' + dt7.replace(/\n/g, ' | '));
+    ok(/判定：.*开闸/.test(dt7), '诊断没报出开闸：' + dt7.replace(/\n/g, ' | '));
+    A.unblock('blockedge7');
+    document.querySelectorAll('#leaveMsgHolder .cardTag').forEach((c) => c.remove());
+    await sleep(200);
+  });
+
+  // ---- P8：形状真不认识时，诊断必须逐格打出来（下一轮排查不用再让北海复现）----
+  await t('P8 形状不认识时：逐格打印在诊断里', async () => {
+    A.block('blockedge8', '怪形状');
+    await sleep(300);
+    window.socket._onmessage('@*怪形状>aaa>bbb>ccc>ddd>eee');
+    await sleep(300);
+    const dt8 = A._diag.mailDiagText();
+    ok(/形状不认识/.test(dt8), '没报出形状不认识：' + dt8.replace(/\n/g, ' | '));
+    ok(/\[0\] 怪形状/.test(dt8) && /\[2\] bbb/.test(dt8), '没逐格打印：' + dt8.replace(/\n/g, ' | '));
+    A.unblock('blockedge8');
+    await sleep(200);
+  });
   await t('P2 被屏蔽者点赞：整帧被丢，站点收不到（也就不会弹）', async () => {
     A.block(BLOCK, NAME);
     await sleep(300);

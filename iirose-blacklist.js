@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.6';
-  const VERSION_CODE = 26;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.7';
+  const VERSION_CODE = 27;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -303,21 +303,36 @@
   const MAIL_TYPE_BY_MARK = { '^': 'follower', '*': 'like', 'h': 'dislike', '$': 'payment' };
 
   // 解析一条信箱记录；null = 形状不认识（残片/未知类型），调用方必须原样放行
+  //
+  // 2026-09-26 真机（北海截图）：转账真帧长这样 ——
+  //   @*Night cruise><头像 URL>'$1>>1790402429>ffffef
+  // 标记位不在第 4 格（官方样本才在 p[3]），格子数也和样本不一样 —— 原来那套"第 3 格必须 1~3 /
+  // 第 6 格 9~11 位时间戳 / 第 7 格 6 位颜色"的下标假设直接把真帧判成"形状不认识"继而放行（闸就不开）。
+  // 改成按特征找，不认死下标：
+  //   · 名字 = 第 0 格（站点渲染 cardTagName 用的就是 p[0]）
+  //   · 标记 = 第 1~5 格里第一个以 ' 开头的格子，其第 2 个字符是类型
+  //   · 全记录里必须同时出现 9~11 位数字（时间戳）与 6 位 hex（颜色）
+  // 三者齐了才认：够严（房间公告那种被 '>' 切碎的长文本凑不出整套）也够宽（6/7 格真帧都认）。
   function mailRecordInfo(f) {
     if (!f || typeof f.length !== 'number') return null;   // 手调 _diag 时传 null 不该抛
     if (f.length === 3) return { type: 'notice', name: '', blockable: false };
-    if (f.length !== 7) return null;
-    const marker = String(f[3] || '');
-    if (marker.charAt(0) !== "'") return null;
+    if (f.length < 4 || f.length > 9) return null;
+    let markIdx = -1;
+    const last = Math.min(f.length - 1, 5);
+    for (let i = 1; i <= last; i++) {
+      if (String(f[i] == null ? '' : f[i]).charAt(0) === "'") { markIdx = i; break; }
+    }
+    if (markIdx < 0) return null;
+    const marker = String(f[markIdx]);
     const type = MAIL_TYPE_BY_MARK[marker.charAt(1)];
     if (!type) return null;
-    // 形状复核（2026-09-26 独立审查 B4 的实测：房间公告文本里含 '>' 时会被切成 7 段、误判成通知记录，
-    // 进而可能命中名单把整条公告丢掉 —— 违反"站级公告一律不动"）。
-    // 真实通知里这三格是稳定的：性别 1~3、时间戳 10 位数字、颜色 6 位 hex；公告文本撑不出整套形状。
-    // 代价：站点若改这三格的含义，会变成"漏拦"而不是"误伤" —— 宁可漏，不误伤（北海零误伤红线）。
-    if (!/^[1-3]$/.test(String(f[2] || ''))) return null;
-    if (!/^\d{9,11}$/.test(String(f[5] || ''))) return null;
-    if (!/^[0-9a-fA-F]{6}$/.test(String(f[6] || ''))) return null;
+    let hasTs = false, hasColor = false;
+    for (let i = 0; i < f.length; i++) {
+      const v = String(f[i] == null ? '' : f[i]);
+      if (!hasTs && /^\d{9,11}$/.test(v)) hasTs = true;
+      else if (!hasColor && /^[0-9a-fA-F]{6}$/.test(v)) hasColor = true;
+    }
+    if (!hasTs || !hasColor) return null;
     return { type: type, name: f[0] || '', blockable: type !== 'payment' };
   }
 
@@ -342,7 +357,7 @@
     const recs = data.slice(2).split('<');
     const kept = [];
     let keptBlocked = 0, keptClean = 0;         // 活下来的记录里：被屏蔽者来的 / 别人的（决定要不要开静默闸）
-    mailDiag.at = Date.now(); mailDiag.raw = String(data).slice(0, 180); mailDiag.recs = []; mailDiag.act = '';
+    mailDiag.at = Date.now(); mailDiag.raw = String(data).slice(0, 400); mailDiag.recs = []; mailDiag.act = '';
     let dropped = 0;
     for (let i = 0; i < recs.length; i++) {
       const rec = recs[i];
@@ -404,9 +419,11 @@
   function mailDiagPush(fields, name, info, hit) {
     if (mailDiag.recs.length >= 5) return;
     mailDiag.recs.push({
-      n: fields.length, name: String(name || '').slice(0, 28),
+      n: fields.length, name: String(name || fields[0] || '').slice(0, 28),
       type: info ? info.type : '形状不认识',
       blockable: info ? !!info.blockable : null, hit: !!hit,
+      // 形状不认识时把逐格内容也带上：下一轮真机排查就不用再来一次
+      cells: info ? null : fields.map(function (v) { return String(v == null ? '' : v).slice(0, 44); }),
     });
   }
 
@@ -441,6 +458,9 @@
       const r = d.recs[i];
       out.push('  · ' + r.n + ' 格 / "' + r.name + '" / ' + r.type + ' / 名单命中' + yn(r.hit)
         + ' / 可丢' + (r.blockable === null ? '—（形状不认识，一律放行）' : yn(r.blockable)));
+      if (r.cells) {
+        for (let c = 0; c < r.cells.length; c++) out.push('      [' + c + '] ' + r.cells[c]);
+      }
     }
     out.push('判定：' + (d.act || '—'));
     return out.join('\n');
