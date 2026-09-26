@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.8';
-  const VERSION_CODE = 28;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.9';
+  const VERSION_CODE = 29;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -1227,6 +1227,8 @@
     // 坐标系：钳制在视口坐标（getBoundingClientRect）里做，写回用 style 坐标（offsetLeft/Top）；
     // 两者正常相等，但 offsetParent 不在原点时会有固定差值，不补掉的话按下的第一帧会跳一下。
     let ew = 0, eh = 0, vdx = 0, vdy = 0;
+    // 拖动阈值只留一个（独立审查 S6 实测：原来 move 用 >3、end 用 <5，位移 4px 时既挪球又开面板）
+    const DRAG_MIN = 5;
     try { handle.style.touchAction = 'none'; } catch (_) { }
     const start = (e) => {
       if (e.pointerType === 'mouse' && e.button) return;      // 只认左键
@@ -1247,9 +1249,11 @@
       if (!dragging) return;
       const dx = e.clientX - sx, dy = e.clientY - sy;
       moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
-      if (moved > 3) {
+      if (moved >= DRAG_MIN) {
         // 撞边即停（不重设基准 —— 北海选的方案 A：往外拖多远，往回拖就要走完那段空程）
-        const p = clampToViewport(ox + dx + vdx, oy + dy + vdy, ew, eh);
+        // 尺寸每帧现量：面板高度会随内容变（新消息进名单、诊断行出现），用按下时的旧尺寸钳会让底部探出视口
+        const r = node.getBoundingClientRect();
+        const p = clampToViewport(ox + dx + vdx, oy + dy + vdy, r.width || ew, r.height || eh);
         node.style.left = Math.round(p.left - vdx) + 'px';
         node.style.top = Math.round(p.top - vdy) + 'px';
       }
@@ -1257,12 +1261,20 @@
     const end = () => {
       if (!dragging || ended === gid) return;                // 同一手势的 mouseup/pointerup 只认第一次
       ended = gid; dragging = false;
-      if (moved < 5) { if (onClick) onClick(); }
-      else if (onDrop) onDrop(node.offsetLeft, node.offsetTop);
+      if (moved < DRAG_MIN) { if (onClick) onClick(); return; }
+      // 落盘前按当前尺寸再钳一次（独立审查 M2）：move 里的钳制管不到"结束时尺寸才变大"这条路径，
+      // 存进 store 的位置必须已经是界内的，否则下次打开面板会先摆到界外再被拉回来（看得见的跳）
+      const r = node.getBoundingClientRect();
+      const p = clampToViewport(r.left, r.top, r.width || ew, r.height || eh);
+      const nl2 = Math.round(p.left - vdx), nt2 = Math.round(p.top - vdy);
+      if (nl2 !== node.offsetLeft || nt2 !== node.offsetTop) {
+        node.style.left = nl2 + 'px'; node.style.top = nt2 + 'px';
+      }
+      if (onDrop) onDrop(node.offsetLeft, node.offsetTop);
     };
     handle.addEventListener('pointerdown', (e) => { usingPointer = true; start(e); });
     handle.addEventListener('pointerup', () => { usingPointer = false; end(); });
-    handle.addEventListener('pointercancel', () => { dragging = false; });
+    handle.addEventListener('pointercancel', () => { dragging = false; ended = gid; });   // 审查 S7：标记已结算，免得后续 mouseup 再走一遍结算逻辑
     handle.addEventListener('pointermove', move);
     // 鼠标这条线保留：① 老浏览器没有 PointerEvent；② 有些环境（测试夹具、被站点改造过的合成事件）
     // 只发 mouse 事件不发 pointer 事件 —— 真机实测 pointerdown 先到，所以有指针事件时忽略这对鼠标事件。
@@ -1615,6 +1627,8 @@
       try {
         // 面板比球大，窄视口下"回默认摆放"本身就可能仍然放不下（面板 330px 宽、视口可能更窄），
         // 所以面板这条保留"钳回视口内"—— 保证看得见、点得到，不整块重摆（重摆会让面板突然跳到球旁边）。
+        // 视口压矮后 maxHeight 要跟着收（构建时算一次的话，面板会比视口还高，底部按钮够不着）
+        panel.style.maxHeight = Math.min(540, Math.max(200, (window.innerHeight || 0) - 40)) + 'px';
         const pr = panel.getBoundingClientRect();
         if (panel.style.display !== 'none' && pr.width) {
           const p2 = clampToViewport(pr.left, pr.top, pr.width, pr.height);
@@ -1626,6 +1640,14 @@
     }
     keepInView();
     window.addEventListener('resize', keepInView);
+    // 面板尺寸变化（名单变长/诊断行出现）自己不会触发 resize —— 挂 ResizeObserver 补上这条路径。
+    // 回调只改 left/top/maxHeight：位置改动不再引起尺寸变化，maxHeight 收敛后也不再变，不会自激。
+    try {
+      if (window.ResizeObserver) {
+        const ro = new ResizeObserver(() => { try { keepInView(); } catch (_) { } });
+        ro.observe(panel);
+      }
+    } catch (_) { }
     window.addEventListener('orientationchange', () => { setTimeout(keepInView, 400); });
     setTimeout(keepInView, 1500);        // 手机地址栏收放/键盘引起的二次变化，再兜一次
     // 摆放策略：① 记住的（用户拖到的）位置 → ② 悬浮球旁边 → ③ 四角，取第一个"点得到"的。

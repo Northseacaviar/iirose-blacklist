@@ -46,7 +46,8 @@
 | A9d | 别人的信箱通知卡片**零影响** | 联调：他人帧字节透传、他人卡片不被隐藏 |
 | A9e | 信箱卡片的隐藏**跟随「拉黑时保留他的历史消息」开关**：关=新旧一起隐；开=已渲染的留着、之后新来的隐 | 解除拉黑后卡片还原（节点不删，只 `display:none`） |
 
-| A10 | **悬浮球与面板都拖不出页面**：任意方向拖到视口外，都停在视口边界内（贴边 4px）；贴边的球仍能点击开合面板；松手记住的位置不越界 | 夹具 `tests/drag-clamp.html`（18 项）；真机：四个方向各拖一次 + 拖完点一下球 |
+| A10 | **悬浮球与面板都拖不出页面**：任意方向拖到视口外，都停在视口边界内（贴边 4px）；贴边的球仍能点击开合面板；松手记住的位置不越界；面板自己长高（新消息进名单）后也会回到界内 | 夹具 `tests/drag-clamp.html`（21 项）；真机：四个方向各拖一次 + 拖完点一下球。已知取舍：视口宽 < 338px 时面板（固定 330px 宽）放不下，右侧会被裁 |
+
 ## 协议与实现路线
 
 协议级丢帧（借鉴 iiroseForge），而非事后删 DOM：站点把 socket 的回调挂在 `window.socket._onmessage`（iiroseForge 的注入代码依赖这一点，已在生产验证）。收包字符串按前缀分类：
@@ -99,7 +100,7 @@ start.bat 本地托管（自定义 JS 注入调试用）
 | `packageName` = 作者名.应用名（英文数字下划线） | `Northseacaviar.iiroseBlacklist` |
 | `package` 元信息 | 全 12 项都提供（源码 `PKG_META`）；其中 `privacy` 公示：**在本地读取聊天/私聊消息内容用于比对黑名单，不修改、不上报、不转发** |
 | **不许私自写 localStorage** | 检测到官方运行时 → 走 `instance.settings/removeSettings`（`#region STORAGE` 适配层）；没有运行时 → 才退回 localStorage，且自检行写明「存储：本地注入（localStorage）」 |
-| `versionName` + `versionCode`（数字，每次发布递增 1） | `VERSION`（字符串）与 `VERSION_CODE`（数字，当前 28）—— **发版两处都要改** |
+| `versionName` + `versionCode`（数字，每次发布递增 1） | `VERSION`（字符串）与 `VERSION_CODE`（数字，当前 29）—— **发版两处都要改** |
 | `outerLoad` 公示外部引用 | 空串（单文件、零依赖，不引任何外部 js/css/html） |
 | `runAt` | `allReady`（规范推荐默认；收包钩子有 5 秒自愈，晚挂上也不漏） |
 | `device` | `*` |
@@ -143,11 +144,11 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 | **loader（推荐）** | 什么都不用做，**刷新页面**即最新版（F5；手机下拉刷新/切页也行）。loader v2 会**并行取回各候选地址、比出版本最高的那份再注入**，所以「CDN 分支缓存还停在旧版」这种局面不会再让用户拿到旧代码 |
 | 直连 `iirose-blacklist.js` | ① 把地址里 `?v=` 的数字改大（新数字 = 新 URL，浏览器必须重新下载，CDN 忽略查询串照常返回最新文件）② 在站点的自定义 JS 里**重新粘贴一次**（地址存在 `extJs` 里，不重粘永远只认旧地址） |
 | 本地调试（`start.bat`） | 直接 `Ctrl+F5`，本地不经 CDN，没有 7 天缓存 |
-| 想固定某个版本 | 用 tag 地址：`.../iirose-blacklist@v0.3.9/loader.js`（或主脚本 `@v0.3.9/iirose-blacklist.js`）|
+| 想固定某个版本 | 用 tag 地址：`.../iirose-blacklist@v0.3.10/loader.js`（或主脚本 `@v0.3.10/iirose-blacklist.js`）|
 
 **还有一道是浏览器自己的缓存（7 天）**：jsdelivr 给的是 `Cache-Control: public, max-age=604800`，所以 **loader 自己那个 URL 也会被浏览器缓存 7 天** —— CDN 上已经是新版，你的浏览器照样把旧的直接拿出来用。loader 只能给**主脚本**加 `?t=` 绕缓存，它没法给自己的地址加。→ **要立刻换掉 loader，唯一办法是换地址**（钉 tag，或在地址后随便加个查询串如 `?v=2`），让浏览器当成新 URL 重新下载。
 
-**刷新了还是不生效？把地址临时钉到本次 tag**：`…iirose-blacklist@v0.3.9/loader.js` —— tag 地址不可变，CDN 上第一次请求必然回源，**不可能**给你旧文件（分支地址 `@main` / 不带 ref 的地址都可能被缓存最多 **12 小时**，且清缓存接口不保证能立刻刷掉分支解析；`node tools/purge-cdn.js` **只管得了 CF + FY 两家主机**，gcore 的 `@main` 陈旧且 purge 接口不覆盖）。
+**刷新了还是不生效？把地址临时钉到本次 tag**：`…iirose-blacklist@v0.3.10/loader.js` —— tag 地址不可变，CDN 上第一次请求必然回源，**不可能**给你旧文件（分支地址 `@main` / 不带 ref 的地址都可能被缓存最多 **12 小时**，且清缓存接口不保证能立刻刷掉分支解析；`node tools/purge-cdn.js` **只管得了 CF + FY 两家主机**，gcore 的 `@main` 陈旧且 purge 接口不覆盖）。
 
 确认更新成功：面板标题显示版本号；或控制台 `__IIROSE_BLACKLIST__.version`；面板自检行还会写明「存储：官方 settings / 本地注入（localStorage）」。
 
@@ -202,8 +203,8 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/mobile-probe.js
 本项目的 token 与花费由脚本直查本机 Hermes 会话库生成（只读），明细见 [`docs/成本账.md`](docs/成本账.md)。
 
 <!-- COST:BEGIN 由 tools/token-report.py --readme 生成，别手改 -->
-- 截至 2026-09-26 15:49（北京时间）：估算花费 **$2.0470**（≈15 元人民币）· 消息 1,276 · 工具调用 656
-- 结构：主开发会话 $1.75 ／ 子 agent 独立审查 $0.20 ／ 部分相关折算 $0.10（明细见 [`docs/成本账.md`](docs/成本账.md)）
+- 截至 2026-09-26 16:02（北京时间）：估算花费 **$2.1346**（≈15 元人民币）· 消息 1,401 · 工具调用 719
+- 结构：主开发会话 $1.77 ／ 子 agent 独立审查 $0.26 ／ 部分相关折算 $0.10（明细见 [`docs/成本账.md`](docs/成本账.md)）
 - 口径：`estimated_cost_usd` 是**估算不是账单**；`reasoning_tokens` 通常已含在输出口径里；缓存读占 ~98%，所以「总 token 近亿」不等于贵。
 - 复现：`python tools/token-report.py`（屏幕）· `--doc docs/成本账.md`（重写成本账）· `--readme README.md`（刷新本段）
 <!-- COST:END -->
@@ -229,5 +230,6 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/mobile-probe.js
 | `v0.3.5` | 插件 v0.3.4：被屏蔽者来信箱不弹面板/不响铃/不推未读（界面层 600ms 静默闸，帧仍照旧透传） |
 | `v0.3.6` | 插件 v0.3.5：面板内置「信箱诊断」 |
 | `v0.3.7` | 插件 v0.3.6：诊断改 760px 大字窗口（可滚动、可选中、可复制全文） |
+| `v0.3.10` | 插件 v0.3.9：独立审查（M1/M2/S5/S6/S7）修正 —— 拖动/点击阈值统一（原来位移 4px 时既挪球又开面板）、尺寸每帧现量 + 落盘前再钳（面板底部不再探出）、面板自己长高靠 ResizeObserver 回到界内、视口压矮时重算面板高度上限 |
 | `v0.3.9` | 插件 v0.3.8：**悬浮窗拖不出页面** —— 拖动实时钳到视口边界（撞边即停、不重设基准），松手记住的是钳过的位置；越位（转屏/键盘弹出把元素挤出视口）时球直接拉回默认右下角 |
 | `v0.3.8` | 插件 v0.3.7：形状守卫改成**按特征找、不认死下标** —— 真机转账帧只有 6 格、标记不在第 4 格，原先按死下标会把它判成「形状不认识」而放行（信箱照弹） |
