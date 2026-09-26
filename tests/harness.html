@@ -154,7 +154,15 @@ function capturedGesture(pressNode) {
   target.dispatchEvent(new MouseEvent('click', o));
   CAPTURE.el = null;
 }
-function panel() { return innermost((e) => /^已拉黑 \(\d+\)$/.test(e.textContent || '')) ? (innermost((e) => /^已拉黑 \(\d+\)$/.test(e.textContent || '')).parentElement) : null; }
+// 面板本体 = 从「已拉黑 (N)」那个标题往上找到的第一个 position:fixed 容器
+// （v0.3.14 起标题被包进了 tab 分组 div，不能再拿 parentElement 当面版本体）
+function panel() {
+  const h = innermost((e) => /^已拉黑 \(\d+\)$/.test(e.textContent || ''));
+  if (!h) return null;
+  let n = h;
+  while (n && n !== document.body && !(n.style && n.style.position === 'fixed')) n = n.parentElement;
+  return (n && n !== document.body) ? n : null;
+}
 
 async function run() {
   const A = window.__IIROSE_BLACKLIST__;
@@ -1186,6 +1194,69 @@ async function run() {
     }
     await sleep(200);
     ok(seenRow(), '解除后该房间没回到「最近出现的房间」列表');
+  });
+
+  const tabBtn = (root, pre) => Array.from(root.querySelectorAll('button'))
+    .find((b) => (b.textContent || '').indexOf(pre) === 0) || null;
+  const vis = (el) => !!(el && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0);
+
+  await t('W66 面板改名区：两个 tab 并排、列表组跟着 tab 切、两个输入框上下排', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    const p = await ensurePanel();
+    ok(p, '面板没打开');
+    const tU = tabBtn(p, '已拉黑用户'), tR = tabBtn(p, '已屏蔽房间');
+    ok(tU && tR, '找不到「已拉黑用户 / 已屏蔽房间」两个 tab 按钮');
+    const ru = tU.getBoundingClientRect(), rr = tR.getBoundingClientRect();
+    eq(Math.abs(ru.top - rr.top) < 2, true, '两个 tab 没并排（top 差 ' + Math.abs(ru.top - rr.top) + '）');
+    eq(rr.left > ru.left, true, '「已屏蔽房间」应该在右边');
+    const iu = p.querySelector('input[placeholder*="uid"]'), ir = p.querySelector('input[placeholder*="房间 id"]');
+    ok(iu && ir, '两个输入框不都在面板里');
+    eq(ir.getBoundingClientRect().top > iu.getBoundingClientRect().top, true, '两个输入框没做成上下排');
+    // 组标题（纯文本 div）跟着 tab 显隐
+    const head = (pre) => Array.from(p.querySelectorAll('div'))
+      .find((d) => !d.children.length && (d.textContent || '').indexOf(pre) === 0) || null;
+    const hBl = head('已拉黑 ('), hRoom = head('已屏蔽房间 (');
+    ok(hBl && hRoom, '找不到两组的标题行');
+    try {
+      realClick(tR); await sleep(200);
+      eq(A.store.conf.tab, 'rooms', '切到房间 tab 后没落盘');
+      eq(vis(hRoom), true, '房间 tab 下「已屏蔽房间」一组没显示');
+      eq(vis(hBl), false, '房间 tab 下「已拉黑」一组还露着');
+      realClick(tU); await sleep(200);
+      eq(A.store.conf.tab, 'users', '切回用户 tab 后没落盘');
+      eq(vis(hBl), true, '用户 tab 下「已拉黑」一组没显示');
+      eq(vis(hRoom), false, '用户 tab 下「已屏蔽房间」一组还露着');
+      // 没选中的那组里的按钮不该被自检算成"点不到"（inHiddenBox 过滤）
+      const invis = A._diag.hitTest().filter((x) => !x.visible);
+      eq(invis.length <= 1, true, '隐藏组里的控件被算进"点不到"：'
+        + JSON.stringify(invis.map((x) => x.what).slice(0, 6)));
+    } finally {
+      realClick(tU); await sleep(150);
+    }
+  });
+
+  await t('W67 动作带着 tab 走：屏蔽房间 → 自动切房间组；拉黑 → 自动切回用户组', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    const p = await ensurePanel();
+    const tU = tabBtn(p, '已拉黑用户'), tR = tabBtn(p, '已屏蔽房间');
+    ok(tU && tR, '找不到两个 tab 按钮');
+    const U = 'tab0000000001';                     // 本用例专用，避免撞上别的用例已经拉黑的 uid
+    if (A.isBlocked(U)) A.unblock(U);
+    try {
+      realClick(tU); await sleep(150);
+      A.blockRoom(RID_C, '第三个房间');
+      await sleep(200);
+      eq(A.store.conf.tab, 'rooms', '屏蔽房间后没自动切到房间组');
+      eq(vis(tabBtn(p, '已屏蔽房间')), true, 'tab 按钮消失了');
+      A.block(U, '临时用户');
+      eq(A.isBlocked(U), true, '前置：这个 uid 应该拉黑成功（否则后面的断言看不出是切 tab 的问题）');
+      await sleep(200);
+      eq(A.store.conf.tab, 'users', '拉黑后没自动切回用户组');
+    } finally {
+      A.unblockRoom(RID_C); A.unblock(U);
+      realClick(tU); await sleep(150);
+    }
   });
 
   const fail = results.filter((r) => !r.ok);

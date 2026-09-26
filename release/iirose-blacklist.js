@@ -2,8 +2,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.13';
-  const VERSION_CODE = 33;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.14';
+  const VERSION_CODE = 34;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -99,6 +99,7 @@
         confVersion: CONF_VERSION,   // 见顶部说明：用来区分"用户显式选择"与"上一版的默认值"
         debug: false,
         panel: null,          // 用户拖到的面板位置（null=自动摆放）
+        tab: 'users',         // 面板停在哪个 tab：'users'=已拉黑用户 / 'rooms'=已屏蔽房间
         // 拉黑时遍历聊天记录，清掉被拉黑者的历史（点播卡片 + 消息）—— 默认行为（keepHistory=false）
         keepHistory: false,   // false=拉黑瞬间清掉他的历史消息（默认）；true=文字历史只留不删，只拦新消息
         // 点播卡片（媒体消息）单独一档：卡片不算"聊天记录"，即使 keepHistory 开着也照清
@@ -151,6 +152,7 @@
       if (raw.conf.panel && typeof raw.conf.panel.left === 'number' && typeof raw.conf.panel.top === 'number') {
         s.conf.panel = { left: raw.conf.panel.left, top: raw.conf.panel.top };
       }
+      if (raw.conf.tab === 'rooms' || raw.conf.tab === 'users') s.conf.tab = raw.conf.tab;
     }
     return s;
   }
@@ -1263,11 +1265,22 @@
     }
     return false;
   }
+  // 有没有祖先被 display:none 藏起来（例如"没选中的那个 tab"里的按钮）——
+  // 那是"这一组本来就没显示"，不是"点不到"，不该进自检报告（否则自检数字会被隐藏 tab 灌水）
+  function inHiddenBox(n) {
+    let e = n;
+    while (e && e !== document.body && e.nodeType === 1) {
+      if (getComputedStyle(e).display === 'none') return true;
+      e = e.parentNode;
+    }
+    return false;
+  }
   function hitTestControls() {
     const out = [];
     const scan = (root) => {
       if (!root) return;
       Array.prototype.forEach.call(root.querySelectorAll('[data-bl-key],button'), (n) => {
+        if (inHiddenBox(n)) return;
         const r = n.getBoundingClientRect();
         const cx = r.left + Math.min(r.width / 2, 40), cy = r.top + r.height / 2;
         const top = document.elementFromPoint(cx, cy);
@@ -1524,8 +1537,38 @@
     });
     panel.appendChild(sessToggle);
 
-    // 添加
-    const addRow = el('div', { display: 'flex', gap: '6px', padding: '10px 12px 6px' });
+    // 名字区（v0.3.14 改版）：两个 tab 并排，点哪个下面就显示哪一组列表 ——
+    // 「已拉黑用户」下是 已拉黑 + 最近出现；「已屏蔽房间」下是 已屏蔽房间 + 最近出现的房间。
+    // 两个输入框一上一下都常驻，不跟着 tab 藏（省得为了输个 id 来回切）。
+    const tabBar = el('div', { display: 'flex', gap: '6px', padding: '9px 12px 0' });
+    function mkTab(txt) {
+      return el('button', {
+        flex: '1', background: '#2a2b33', color: '#c9c9d0', border: '1px solid #3a3b44',
+        borderRadius: '6px', padding: '7px 4px', cursor: 'pointer', fontSize: '12px', fontWeight: '700',
+      }, txt);
+    }
+    const tabUsers = mkTab('已拉黑用户 (0)');
+    const tabRooms = mkTab('已屏蔽房间 (0)');
+    tabBar.appendChild(tabUsers); tabBar.appendChild(tabRooms);
+    panel.appendChild(tabBar);
+    let curTab = 'users';
+    function paintTab(b, on) {
+      b.style.background = on ? '#b3261e' : '#2a2b33';
+      b.style.color = on ? '#fff' : '#c9c9d0';
+      b.style.borderColor = on ? '#b3261e' : '#3a3b44';
+    }
+    function setTab(t) {
+      curTab = (t === 'rooms') ? 'rooms' : 'users';
+      const rooms = curTab === 'rooms';
+      groupUsers.style.display = rooms ? 'none' : 'block';
+      groupRooms.style.display = rooms ? 'block' : 'none';
+      paintTab(tabUsers, !rooms);
+      paintTab(tabRooms, rooms);
+      if (store.conf.tab !== curTab) { store.conf.tab = curTab; saveStore(); }
+    }
+
+    // 添加（两个输入框一上一下）
+    const addRow = el('div', { display: 'flex', gap: '6px', padding: '8px 12px 4px' });
     const input = el('input', {
       flex: '1', background: '#2a2b33', border: '1px solid #444', borderRadius: '6px', color: '#eee',
       padding: '6px 9px', fontSize: '12px', outline: 'none', minWidth: '0',
@@ -1538,29 +1581,7 @@
     addRow.appendChild(input); addRow.appendChild(addBtn);
     panel.appendChild(addRow);
 
-    const status = el('div', { padding: '0 12px 8px', color: '#999', fontSize: '11px', minHeight: '15px' }, '拉黑入口：下面「见过的人」里点拉黑，或粘 UID 点拉黑');
-    panel.appendChild(status);
-    function setStatus(t, color) { status.textContent = t; status.style.color = color || '#999'; }
-
-    // 已拉黑
-    const blHead = el('div', { padding: '6px 12px', color: '#d98a86', fontWeight: '700', borderTop: '1px solid #2a2b33' }, '已拉黑 (0)');
-    panel.appendChild(blHead);
-    const blList = el('div', { overflowY: 'auto', maxHeight: '170px', minHeight: '46px', flexShrink: '0' });
-    panel.appendChild(blList);
-
-    // 最近出现
-    const seenHead = el('div', { padding: '6px 12px', color: '#8aa0c9', fontWeight: '700', borderTop: '1px solid #2a2b33' }, '最近出现 (0)');
-    panel.appendChild(seenHead);
-    const seenList = el('div', { overflowY: 'auto', maxHeight: '150px', minHeight: '46px', flexShrink: '0' });
-    panel.appendChild(seenList);
-
-    // 房间屏蔽（v0.3.12）：在房间列表（热推/订阅/管理/历史/地图）里隐藏指定房间
-    const roomSecHead = el('div', {
-      padding: '7px 12px', color: '#c9b48a', fontWeight: '700', borderTop: '1px solid #2a2b33', background: '#191a20',
-    }, '房间屏蔽');
-    panel.appendChild(roomSecHead);
-
-    const roomAddRow = el('div', { display: 'flex', gap: '6px', padding: '8px 12px 4px' });
+    const roomAddRow = el('div', { display: 'flex', gap: '6px', padding: '0 12px 6px' });
     const roomInput = el('input', {
       flex: '1', background: '#2a2b33', border: '1px solid #444', borderRadius: '6px', color: '#eee',
       padding: '6px 9px', fontSize: '12px', outline: 'none', minWidth: '0',
@@ -1573,6 +1594,28 @@
     roomAddRow.appendChild(roomInput); roomAddRow.appendChild(roomAddBtn);
     panel.appendChild(roomAddRow);
 
+    const status = el('div', { padding: '0 12px 8px', color: '#999', fontSize: '11px', minHeight: '15px' }, '拉黑入口：右边输入框粘 UID，或在下面「最近出现」里点拉黑');
+    panel.appendChild(status);
+    function setStatus(t, color) { status.textContent = t; status.style.color = color || '#999'; }
+
+    // 组一：人（已拉黑 + 最近出现）
+    const groupUsers = el('div', null);
+    panel.appendChild(groupUsers);
+
+    const blHead = el('div', { padding: '6px 12px', color: '#d98a86', fontWeight: '700', borderTop: '1px solid #2a2b33' }, '已拉黑 (0)');
+    groupUsers.appendChild(blHead);
+    const blList = el('div', { overflowY: 'auto', maxHeight: '190px', minHeight: '46px', flexShrink: '0' });
+    groupUsers.appendChild(blList);
+
+    const seenHead = el('div', { padding: '6px 12px', color: '#8aa0c9', fontWeight: '700', borderTop: '1px solid #2a2b33' }, '最近出现 (0)');
+    groupUsers.appendChild(seenHead);
+    const seenList = el('div', { overflowY: 'auto', maxHeight: '170px', minHeight: '46px', flexShrink: '0' });
+    groupUsers.appendChild(seenList);
+
+    // 组二：房间（已屏蔽房间 + 最近出现的房间）
+    const groupRooms = el('div', { display: 'none' });
+    panel.appendChild(groupRooms);
+
     // 提示行随手带一句"页面上识别到几张卡"：选择器若和真机结构不符，这里会显示 0 —— 一眼看出是没打开列表还是真失效
     let roomCardsOnPage = -1;
     function refreshRoomTip() {
@@ -1581,19 +1624,19 @@
           : '页面上暂时没识别到房间卡片（打开一次热推/地图就会出来；列表开着仍是 0 就是站点结构变了，去控制台跑 _diag.rooms()）。')
         + '屏蔽的房间会从列表里隐藏，随时可解除。';
     }
-    const roomTip = el('div', { padding: '0 12px 6px', color: '#7f8794', fontSize: '11px' });
-    panel.appendChild(roomTip);
+    const roomTip = el('div', { padding: '0 12px 6px', color: '#7f8794', fontSize: '11px', borderTop: '1px solid #2a2b33' });
+    groupRooms.appendChild(roomTip);
     refreshRoomTip();
 
-    const roomHead = el('div', { padding: '6px 12px', color: '#c9b48a', fontWeight: '700', borderTop: '1px solid #2a2b33' }, '已屏蔽房间 (0)');
-    panel.appendChild(roomHead);
-    const roomList = el('div', { overflowY: 'auto', maxHeight: '120px', minHeight: '40px', flexShrink: '0' });
-    panel.appendChild(roomList);
+    const roomHead = el('div', { padding: '6px 12px', color: '#c9b48a', fontWeight: '700' }, '已屏蔽房间 (0)');
+    groupRooms.appendChild(roomHead);
+    const roomList = el('div', { overflowY: 'auto', maxHeight: '190px', minHeight: '40px', flexShrink: '0' });
+    groupRooms.appendChild(roomList);
 
     const roomSeenHead = el('div', { padding: '6px 12px', color: '#8aa0c9', fontWeight: '700', borderTop: '1px solid #2a2b33' }, '最近出现的房间 (0)');
-    panel.appendChild(roomSeenHead);
-    const roomSeenList = el('div', { overflowY: 'auto', maxHeight: '120px', minHeight: '40px', flexShrink: '0' });
-    panel.appendChild(roomSeenList);
+    groupRooms.appendChild(roomSeenHead);
+    const roomSeenList = el('div', { overflowY: 'auto', maxHeight: '170px', minHeight: '40px', flexShrink: '0' });
+    groupRooms.appendChild(roomSeenList);
 
     // 统计 + 底部按钮
     const stats = el('div', { padding: '8px 12px', color: '#7f8794', borderTop: '1px solid #2a2b33' }, '已屏蔽：房间 0 · 私聊 0 · 弹幕 0 · 历史 0');
@@ -1738,6 +1781,7 @@
       blList.innerHTML = '';
       const keys = Object.keys(store.uids).sort((a, b) => (store.uids[b].ts || 0) - (store.uids[a].ts || 0));
       blHead.textContent = '已拉黑 (' + keys.length + ')';
+      tabUsers.textContent = '已拉黑用户 (' + keys.length + ')';
       if (!keys.length) { blList.appendChild(el('div', { padding: '8px 12px', color: '#666' }, '（名单为空）')); return; }
       keys.forEach((uid) => {
         const name = store.uids[uid].name || ((store.seen[uid] || {}).name) || '';
@@ -1765,6 +1809,7 @@
       roomList.innerHTML = '';
       const keys = Object.keys(store.rids).sort((a, b) => (store.rids[b].ts || 0) - (store.rids[a].ts || 0));
       roomHead.textContent = '已屏蔽房间 (' + keys.length + ')';
+      tabRooms.textContent = '已屏蔽房间 (' + keys.length + ')';
       if (!keys.length) { roomList.appendChild(el('div', { padding: '8px 12px', color: '#666' }, '（名单为空）')); return; }
       keys.forEach((rid) => {
         const name = store.rids[rid].name || ((store.rooms[rid] || {}).name) || '';
@@ -1850,6 +1895,10 @@
     };
     onPress(roomAddBtn, doAddRoom);
     roomInput.onkeydown = (e) => { if (e.key === 'Enter') doAddRoom(); };
+
+    onPress(tabUsers, () => { setTab('users'); });
+    onPress(tabRooms, () => { setTab('rooms'); });
+    setTab(store.conf.tab === 'rooms' ? 'rooms' : 'users');    // 上次停在哪个 tab，这次还停在那儿
 
     document.body.appendChild(panel);
     document.body.appendChild(fab);
@@ -1949,7 +1998,7 @@
       statusMsg('面板位置已记住', '#68b26d');
     });
 
-    ui = { panel, fab, setStatus, refreshAll, refreshSeen, refreshStats, refreshBlacklist, refreshRooms, refreshRoomSeen, setCardCount, refreshRoomTip, diagLine, openDiag };
+    ui = { panel, fab, setStatus, refreshAll, refreshSeen, refreshStats, refreshBlacklist, refreshRooms, refreshRoomSeen, setCardCount, refreshRoomTip, setTab, diagLine, openDiag };
     refreshAll();
   }
 
@@ -1966,7 +2015,7 @@
     if (name) recordSeen(store, uid, name);
     log('拉黑', uid, name || '');
     statusMsg('已拉黑 ' + (name || uid), '#68b26d');
-    if (ui) { ui.refreshAll(); }
+    if (ui) { if (ui.setTab) ui.setTab('users'); ui.refreshAll(); }
     try { sweepAll(); } catch (e) { noteError('拉黑后的历史清扫', e); }
   }
 
@@ -1992,7 +2041,7 @@
     saveStore();
     log('屏蔽房间', rid, name || '');
     statusMsg('已屏蔽房间 ' + (name || rid), '#68b26d');
-    if (ui) { ui.refreshAll(); }
+    if (ui) { if (ui.setTab) ui.setTab('rooms'); ui.refreshAll(); }
     try { sweepRoomCards(null, true); } catch (e) { noteError('屏蔽房间后的清扫', e); }
   }
 
