@@ -174,7 +174,7 @@ async function run() {
     eq(A.isBlocked('myown0000001a'), false);
   });
 
-  await t('W9 默认语义：拉黑瞬间清掉该用户的历史消息 + 点播卡片（2026-09-25 需求重新界定）', async () => {
+  await t('W9 默认语义：拉黑瞬间清掉该用户的历史消息 + 点播卡片', async () => {
     eq(A.store.conf.keepHistory, false, 'v0.2.1 起默认「拉黑时清掉他的历史消息」');
     eq(A.store.conf.clearCards, true, '默认「清除历史点播卡片」为开');
     A.block(ID.OLD, '旧用户');
@@ -538,7 +538,7 @@ async function run() {
     await sleep(150);
   });
 
-  await t('W36 保留历史时，连"5 秒全扫"那趟也不删消息（A.sweep() 确定性触发 —— 审查③-1 缺口）', async () => {
+  await t('W36 保留历史时，连"5 秒全扫"那趟也不删消息（A.sweep() 确定性触发 —— 此前缺口）', async () => {
     const A = window.__IIROSE_BLACKLIST__;
     A.setEnabled(true); A.setKeepHistory(true);
     const uid = 'sweep0000001z';
@@ -555,7 +555,7 @@ async function run() {
     n.parentNode && n.parentNode.removeChild(n);
   });
 
-  await t('W37 面板两个新开关真的点得动、方框同步、落盘（审查③-2 缺口：原来没有用例点过）', async () => {
+  await t('W37 面板两个新开关真的点得动、方框同步、落盘（此前缺口：原来没有用例点过）', async () => {
     const A = window.__IIROSE_BLACKLIST__;
     A.setKeepHistory(true); A.setHideSession(true);
     await sleep(150);
@@ -579,7 +579,7 @@ async function run() {
     eq(A.store.conf.hideSession, true, '再点应切回开');
   });
 
-  await t('W38 API 传非布尔值不改配置、不切到破坏性方向（审查③-4）', () => {
+  await t('W38 API 传非布尔值不改配置、不切到破坏性方向', () => {
     const A = window.__IIROSE_BLACKLIST__;
     A.setKeepHistory(true);
     eq(A.setKeepHistory(0), true, 'setKeepHistory(0) 不该关掉保留');
@@ -592,7 +592,7 @@ async function run() {
     eq(A.store.enabled, true);
   });
 
-  await t('W39 uid 含下划线时按 data-uid 取（审查③-5：data-id 拼串会切出假 uid）', () => {
+  await t('W39 uid 含下划线时按 data-uid 取（data-id 拼串会切出假 uid）', () => {
     const A = window.__IIROSE_BLACKLIST__;
     const n = document.createElement('div');
     n.className = 'msg';
@@ -738,7 +738,7 @@ async function run() {
     A.unblock(uid);
   });
 
-  await t('W47 一次拉黑 = 遍历聊天记录清掉他的历史消息 + 点播卡片，他人一行不动（需求重新界定的确定性用例）', async () => {
+  await t('W47 一次拉黑 = 遍历聊天记录清掉他的历史消息 + 点播卡片，他人一行不动（确定性用例）', async () => {
     const A = window.__IIROSE_BLACKLIST__;
     A.setEnabled(true); A.setKeepHistory(false); A.setClearCards(true);
     const h = document.getElementById('msgHolder');

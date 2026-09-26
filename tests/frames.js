@@ -43,7 +43,7 @@
 
     // 官方文档原样样本（回归对照，别改）
     docRoom: '"1700000011>https://static.codemao.cn/i/23/10/21/22/2620-Z1.bmp>测试甲>test>040b02>040b02>1>>a1b2c3d4e5f67>g\'91\'2325>111222333444',
-    docPrivate: '""1700000013>f7e6d5c4b3a21>测试甲.‎˖٭𓂃>http://r.iirose.com/i/24/1/14/20/3912-02.jpg>test>339f88>>339f88>3>http://r.iirose.com/i/21/4/7/15/4636-YT.png>555666777888',
+    docPrivate: '""1700000013>f7e6d5c4b3a21>测试乙>http://r.iirose.com/i/24/1/14/20/3912-02.jpg>test>339f88>>339f88>3>http://r.iirose.com/i/21/4/7/15/4636-YT.png>555666777888',
     docDanmaku: '=测试甲>test>040b02>040b02>1>https://static.codemao.cn/i/23/10/21/22/2620-Z1.bmp>1700000012>a1b2c3d4e5f67>g>2325>f590',
     docMailLike: "@*测试甲>cartoon/600264>2>'*>>1762613079>d28ad2",   // 官方 docs/markdown/event/event_message.md 点赞样本
 
@@ -63,7 +63,7 @@
     room3: '"' + [roomRec(OTHER_UID, '甲', 'AAA', '1700000001'),
       roomRec(ROOM_UID, '测试甲', 'BBB', '1700000002'),
       roomRec(THIRD_UID, '丙', 'CCC', '1700000003')].join('<'),
-    priv2: '""' + [privRec(PRIV_UID, '测试甲', 'hello', '1700000101'),
+    priv2: '""' + [privRec(PRIV_UID, '测试乙', 'hello', '1700000101'),
       privRec(OTHER_UID, '甲', 'yo', '1700000102')].join('<'),
 
     // 应当原样透传的其它帧

@@ -54,7 +54,7 @@ const rowOf = (id) => document.getElementById(id);
   A.setEnabled(true);
 
   // ---- E1：面板整块插入（第一次出现）+ 「保留历史」开着 → 面板里原有的历史卡片不该被隐 ----
-  await t('E1 面板首次出现就带着历史卡片：保留历史开着 → 历史留着（审查 D6 回归）', async () => {
+  await t('E1 面板首次出现就带着历史卡片：保留历史开着 → 历史留着（回归）', async () => {
     A.setKeepHistory(true);
     A.block(BLOCK, NAME);                       // 先拉黑，且此时页面上还没有信箱面板
     await sleep(300);
@@ -70,8 +70,8 @@ const rowOf = (id) => document.getElementById(id);
     await sleep(200);
   });
 
-  // ---- E2：站点重渲染把 display 改回来 → 下一次扫必须按回去（审查 D3 回归）----
-  await t('E2 站点把已隐藏卡片的 display 改回来 → 再扫一次要重新隐藏（审查 D3 回归）', async () => {
+  // ---- E2：站点重渲染把 display 改回来 → 下一次扫必须按回去（回归）----
+  await t('E2 站点把已隐藏卡片的 display 改回来 → 再扫一次要重新隐藏（回归）', async () => {
     A.setKeepHistory(false);                    // 关 = 新旧一起隐
     A.block(BLOCK, NAME);
     await sleep(300);

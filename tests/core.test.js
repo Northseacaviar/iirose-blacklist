@@ -249,7 +249,7 @@ t('信箱·形状守卫（按特征找，不认死下标）：时间戳/颜色�
   eq(L.mailRecordInfo("甲>a>'*>1762613079>d28ad2".split('>')).type, 'like', '5 格变体（标记在第 3 格）');
   eq(L.mailRecordInfo(['甲', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']), null, '10 格该当成不认识');
 });
-t('信箱·手调 _diag 时传 null/undefined 不该抛（审查 C5）', () => {
+t('信箱·手调 _diag 时传 null/undefined 不该抛', () => {
   eq(L.mailRecordInfo(null), null);
   eq(L.mailRecordInfo(undefined), null);
   eq(L.mailRecordInfo([]), null);
@@ -257,7 +257,7 @@ t('信箱·手调 _diag 时传 null/undefined 不该抛（审查 C5）', () => {
   eq(L.mailHit(null, '甲', 'a.jpg'), null);
   eq(L.mailHit(undefined, '甲', 'a.jpg'), null);
 });
-t('统计·mail 计数能落盘、清空统计也认得它（审查 C2：原来只在内存里，重启清零）', () => {
+t('统计·mail 计数能落盘、清空统计也认得它（原来只在内存里，重启清零）', () => {
   const d = L.defaultStore();
   ok('mail' in d.counters, '默认 counters 里没有 mail 键 → 永远落不了盘');
   const norm = L.normalizeStore({ counters: { room: 3, mail: 7, dom: 2 } });
@@ -344,7 +344,7 @@ t('findUidByName 忽略大小写、取最近出现的', () => {
   eq(L.findUidByName(s, '').uid, null);
 });
 
-console.log('\n== 审查报告回归（分隔符错位 / 原型污染）==');
+console.log('\n== 边界回归（分隔符错位 / 原型污染）==');
 t('B1-1 房间内容含 < ：不能静默漏过，也不能回拼残片（整帧丢）', () => {
   const frame = '"' + F.roomRec(F.ROOM_UID, '甲', '5<3 is true', '1700000001');
   const r = L.filterFrame(frame, storeWith([F.ROOM_UID]), null);
@@ -418,7 +418,7 @@ t('normalizeStore 保留面板位置（否则拖到的位置落盘后会丢）',
 
 t('normalizeStore 保留新增的记录保留开关（否则用户关掉后刷新又变回默认）', () => {
   const d = L.normalizeStore({});
-  eq(d.conf.keepHistory, false, '默认应为"拉黑时清掉他的历史消息"（2026-09-25 需求重新界定）');
+  eq(d.conf.keepHistory, false, '默认应为"拉黑时清掉他的历史消息"');
   eq(d.conf.hideSession, true, '默认隐藏会话条目');
   eq(d.conf.clearCards, true, '默认应清掉被拉黑者的历史点播卡片');
   const a = L.normalizeStore({ conf: { confVersion: 2, keepHistory: true, hideSession: false, clearCards: false } });
