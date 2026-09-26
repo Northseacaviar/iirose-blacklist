@@ -23,7 +23,7 @@ CONFIG = {
     'db': 'D:/insane-robot/state.db',
     'label': 'iirose 拉黑插件（iirose-blacklist）',
     'project_dir': 'D:/iirose-blacklist',
-    'main_sessions': ['20260925_1634'],   # 本项目主会话（CLI）。换新会话（/new）后把它加进来，旧的留着别删
+    'main_sessions': ['20260925_1634', '20260926_095331'],   # 本项目主会话（CLI）。换新会话（/new）后把它加进来，旧的留着别删
     'keywords': ['拉黑', '屏蔽', 'iirose-blacklist'],
     'partial_sessions': ['20260925_1238'],   # 手机端 Telegram 那场：部分内容是本项目
     'partial_hints': ['拉黑', '悬浮', '屏蔽', 'blacklist'],

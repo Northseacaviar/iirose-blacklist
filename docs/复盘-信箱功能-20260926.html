@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>时间去哪了 · iirose 拉黑插件「屏蔽信箱通知」v0.3.0/v0.3.1</title>
+<style>
+  :root{--bg:#0f1115;--card:#181b22;--card2:#1f232c;--line:#2b313c;--fg:#e8ecf1;--dim:#98a2b3;--ok:#4ec9a0;--warn:#e2b155;--bad:#e06c75;--acc:#7aa2f7;--acc2:#bb9af7}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.7 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;padding:28px 20px 60px}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 4px}
+  h2{font-size:16px;margin:30px 0 10px;padding-left:9px;border-left:3px solid var(--acc)}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:18px}
+  .grid{display:grid;gap:12px}
+  .k4{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .kpi b{display:block;font-size:21px;font-weight:600}
+  .kpi span{color:var(--dim);font-size:12px}
+  table{width:100%;border-collapse:collapse;font-size:13px;background:var(--card);border-radius:10px;overflow:hidden}
+  th,td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}
+  th{background:var(--card2);color:var(--dim);font-weight:500;font-size:12px;white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  .bar{display:flex;height:34px;border-radius:8px;overflow:hidden;border:1px solid var(--line);cursor:default}
+  .seg{position:relative;display:flex;align-items:center;justify-content:center;font-size:11px;color:#0d1015;font-weight:600;transition:filter .15s}
+  .seg:hover{filter:brightness(1.18)}
+  .plan{background:#4ec9a0}.buf{background:#e2b155}.env{background:#e06c75}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;color:var(--dim);font-size:12px}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
+  .cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+  .card h3{margin:0 0 6px;font-size:14px}
+  .card .why{color:var(--dim);font-size:12.5px;margin:6px 0 0}
+  code{background:#11141a;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12px;color:#cbd5e1}
+  .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:20px;border:1px solid var(--line);color:var(--dim);margin-right:5px}
+  .ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+  details{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-top:10px}
+  summary{cursor:pointer;font-size:13px;color:var(--acc)}
+  .note{background:#141922;border:1px dashed var(--line);border-radius:10px;padding:12px 14px;color:var(--dim);font-size:13px}
+  .foot{margin-top:26px;color:var(--dim);font-size:12px}
+  .num{font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>时间去哪了：新增「屏蔽信箱通知」功能全过程</h1>
+  <div class="sub">项目 <b>iirose-blacklist</b> · 版本 v0.3.0 → v0.3.1 · 2026-09-26 09:54:32 → 11:45:04（北京时间）<br>
+  数据来源：本机 Hermes 会话库 <code>state.db</code> 只读查询（消息时间戳逐条相减），本页数字可直接重跑复现</div>
+
+  <div class="grid k4">
+    <div class="kpi"><b class="num">111 分</b><span>端到端墙钟＝1 小时 51 分</span></div>
+    <div class="kpi"><b class="num">377</b><span>工具调用（消息 740 条）</span></div>
+    <div class="kpi"><b class="num">$0.3353</b><span>本功能开发会话（估算，≈2.4 元）</span></div>
+    <div class="kpi"><b class="num">$0.0776</b><span>独立审查子 agent（另计，与开发并行）</span></div>
+  </div>
+
+  <h2>一眼看清：111 分钟的三类去向</h2>
+  <div class="bar">
+    <div class="seg plan" style="width:56%" title="计划内：需求对齐、调研、实现、自测、发版文档 ≈ 62 分">计划内 56%</div>
+    <div class="seg buf"  style="width:21%" title="真 bug 处理：独立审查抓出 4 处 + v0.3.1 四条 ≈ 23 分">真 bug 21%</div>
+    <div class="seg env"  style="width:23%" title="测试环境死时间：CDP 断线、后台节流、僵尸端口、W22 死磕 ≈ 26 分">环境死时间 23%</div>
+  </div>
+  <div class="legend">
+    <span><i class="dot" style="background:#4ec9a0"></i>计划内 ≈ 62 分（56%）</span>
+    <span><i class="dot" style="background:#e2b155"></i>计划外真 bug ≈ 23 分（21%）</span>
+    <span><i class="dot" style="background:#e06c75"></i>环境死时间 ≈ 26 分（23%）</span>
+  </div>
+  <div class="note" style="margin-top:12px">
+    <b>和你要立的「35% 缓冲」规矩对照：</b>本功能实际用掉 111 分钟，倒推合理工期 ≈ <b>计划 72 分 + 缓冲 39 分</b>。
+    实际计划外支出 <b>49 分（44%）</b> 高于 35% 的预设 —— 其中真 bug 21%（贴近缓冲预算）、<b>真正超支的是环境死时间 23%</b>。
+    结论：35% 缓冲在这类"浏览器里跑真站插件"的项目上要往上抬到 <b>45%</b> 更贴合实际；本页数字就是依据。
+  </div>
+
+  <h2>逐段明细（按你的发言切段，时间戳直算）</h2>
+  <table>
+    <tr><th>#</th><th>时段</th><th>时长</th><th>工具</th><th>这一段实际在干什么</th><th>归类</th></tr>
+    <tr><td>1</td><td>09:54:32–10:06:19</td><td class="num">11.8 分</td><td class="num">50</td><td>盘查现状回答"进房公告现在支持吗"（结论：新公告事实上已拦住、历史公告在开关关时清、README 第 20 行写错了）+ 三轮需求对齐。你最后说"代码暂时不改了，就这样"，这一轮<b>没有产出代码</b>，产出是结论与一份更正</td><td class="plan">计划内</td></tr>
+    <tr><td>2</td><td>10:06:19–10:26:17</td><td class="num">20.0 分</td><td class="num">40</td><td>你连着提了三个新方向（房间目录卡片、推荐页弹卡、<b>信箱消息</b>），我逐个摸协议与 DOM：查官方适配器源码、写探针 v1/v2 到真机抓帧与卡片。<b>其中约 10 分是探针自身的 bug 返工</b>（只读 localStorage → 官方 settings 形态下读到 0 人；存盘用的 &lt;a&gt; 触发了自己的观察者，5 次配额被自己烧光）</td><td class="plan">计划内</td></tr>
+    <tr><td>3</td><td>10:26:17–10:35:34</td><td class="num">9.3 分</td><td class="num">61</td><td><b>实现主体</b>：协议层 <code>filterMailFrame</code>（点赞/关注/点踩丢帧、转账永不丢）、界面层 <code>sweepMailCards</code>（display:none 可还原）、存储层头像快照、诊断 API、18 条单测。这一段是全场最高效的 9 分钟（patch×38）</td><td class="plan">计划内</td></tr>
+    <tr><td>4</td><td>10:35:34–10:51:12</td><td class="num">15.6 分</td><td class="num">35</td><td>自测与联调：建基线快照做 A/B（基线 49/49、基线 harness+新 src 49/49），新增 W50–W54 五条端到端用例；同时派出独立审查子 agent（它另跑了 16.1 分钟，与这段并行，不额外占我的时间）</td><td class="plan">计划内</td></tr>
+    <tr><td>5</td><td>10:51:12–11:01:54</td><td class="num">10.7 分</td><td class="num">13</td><td><b>W22 旧用例偶发红死磕</b>——你已经明确指出这是浪费时间。事后证明它确实非必要（基线对照已证明 src 清白）。这一段 10.7 分钟里有 4 次浏览器往返、1 次 155 秒空等</td><td class="env">环境/死磕</td></tr>
+    <tr><td>6</td><td>11:01:54–11:16:15</td><td class="num">14.4 分</td><td class="num">32</td><td>发版（v0.3.0 tag 推送、CDN 刷新与 md5 复核、成本账）＋ README 大改（需求 4/5、验收表、协议段、测试页说明）；其中约 9 分被 harness 反复卡住吃掉</td><td class="plan">计划内</td></tr>
+    <tr><td>7</td><td>11:16:15–11:45:04</td><td class="num">28.8 分</td><td class="num">65</td><td><b>审查结果落地</b>：独立审查抓出 4 处真 bug（含违反"公告一律不动"红线的伪公告误判）全部修复 + 每条补回归用例；定位并根治"测试页卡住"（<b>是标签页在后台被 Chrome 节流，不是代码问题</b>，切前台 20 秒跑完 54/54）；改探针 v3 做头像判据取证；按你要求把评审余下 4 条小问题修进 v0.3.1 并发版</td><td class="buf">缓冲/真 bug</td></tr>
+  </table>
+
+  <h2>三个时间黑洞（有据可查）</h2>
+  <div class="cards">
+    <div class="card">
+      <h3 class="bad">① 测试环境反复咬人 —— 约 26 分（23%）</h3>
+      <p style="margin:6px 0">现象：harness 停在 <code>50/54</code> 数分钟不动、页面加载变 <code>chrome-error://</code>、浏览器会话约 110 秒必断且守护进程重建浏览器导致结果全丢。</p>
+      <p class="why">根因三条，全部找到：<b>(a)</b> 标签页处于 <code>document.hidden=true</code>，Chrome 把定时器节流到分钟级（调 <code>Page.bringToFront</code> 后 20 秒跑完）；<b>(b)</b> CDP 会话约 110 秒寿命，而整套要 120 秒；<b>(c)</b> <code>:8098</code> 上残留两个僵尸监听进程。</p>
+      <p class="why">已沉淀：README 自测段写死推荐跑法 <b>用 <code>file://</code> 开全新会话（28 秒跑完不掉线）</b>；harness 结果自动落 <code>localStorage.bl_harness_result</code>；skill 里加了"前台跑测试页 + 别用固定 sleep 等周期任务"。</p>
+    </div>
+    <div class="card">
+      <h3 class="bad">② W22 偶发红死磕 —— 10.7 分</h3>
+      <p style="margin:6px 0">现象：一条旧用例在新 harness 里红一次、重跑不复现。</p>
+      <p class="why">代价：4 次浏览器往返 + 1 次 155 秒空等；期间还派过探针做 A/B。</p>
+      <p class="why">你已经拍板过原则并让我写进记忆：<b>"对功能实现无重大影响的问题，若排查时间成本高，交付完成前不排查、交付后再问"</b>。这条原则如果早 10 分钟执行，这段就是 0 分钟。事后它也确实没影响交付（基线对照已证明新 src 清白）。</p>
+    </div>
+    <div class="card">
+      <h3 class="warn">③ 探针自身 bug 返工 —— 约 10 分</h3>
+      <p style="margin:6px 0">现象：探针 v1 到真机后"名单 0 人"、抓不到你点信箱那一刻。</p>
+      <p class="why">根因：探针只读 <code>localStorage</code>（官方 settings 形态下名单不在那儿）；存盘用的 <code>&lt;a&gt;</code> 节点触发了自己的 MutationObserver，5 次配额被自己烧光。</p>
+      <p class="why">已沉淀：改用插件内存 <code>__IIROSE_BLACKLIST__.store</code> 优先 + 存盘节流 4 秒（写进 <code>docs/探针-信箱2.js</code> 注释）。<b>教训</b>：给真机写的探针，先自己跑一遍最小用例再交出去。</p>
+    </div>
+  </div>
+
+  <h2>那"计划内"的 62 分钟具体变成了什么</h2>
+  <table>
+    <tr><th>产出</th><th>说明</th><th>证据</th></tr>
+    <tr><td>协议层</td><td><code>@</code> 信箱帧逐记录判定：点赞 <code>'*</code>／关注 <code>'^</code>／点踩 <code>'h</code> 丢帧；<b>转账 <code>'$</code> 永不丢</b>（"保钱优先"）；认不出的形状字节级透传；7 字段形状复核（性别 1~3、时间戳、颜色 hex）挡住"公告含 &gt; 被误判"</td><td>核心单测 63/63</td></tr>
+    <tr><td>界面层</td><td><code>#leaveMsgHolder .cardTag</code> → <code>display:none</code>（记原值可还原）；站点重渲染后重新按回去；面板整块首次渲染算"历史"；解除拉黑/关总开关两条还原路径</td><td>联调 54/54 + 边界页 3/3</td></tr>
+    <tr><td>存储层</td><td>名单条目快照头像（帧里没有 uid，只能名字/头像认人）；老落盘兼容；<code>counters.mail</code> 落盘</td><td>迁移页 7/7 · 官方形态 23/23</td></tr>
+    <tr><td>测试资产</td><td>新增 22 条单测 + 5 条端到端 + 独立边界页（专测"面板首次出现"这种一次性时序）</td><td>core 41→63 项</td></tr>
+    <tr><td>取证工具</td><td>探针升 v3：头像指纹聚合（谁跟谁共用）、同一名字跨帧头像是否一致、信箱卡片 DOM 头像 vs 名单</td><td><code>docs/探针-信箱2.js</code></td></tr>
+    <tr><td>文档与发版</td><td>README 需求/验收/协议/自测全段更新；v0.3.0、v0.3.1 两次 tag 推送 + CDN 复核（md5 与本地发布件一致）</td><td>CDN <code>x-jsd-version: 0.3.1</code></td></tr>
+  </table>
+
+  <details>
+    <summary>独立审查（子 agent）抓出的 4 处真 bug —— 这是"缓冲"最值的用途</summary>
+    <table style="margin-top:8px">
+      <tr><th>问题</th><th>后果</th><th>修法与回归</th></tr>
+      <tr><td>站级公告文本里含 4 个 <code>&gt;</code> 时被切成 7 段、恰好落成"点赞记录"</td><td><b>整条公告被丢弃</b>（违反"公告一律不动"红线）</td><td>7 字段加形状复核；core 新增 2 条用例</td></tr>
+      <tr><td>站点重渲染把已隐藏卡片的 <code>display</code> 改回可见</td><td>卡片永久可见，定时扫也补不回来（漏拦）</td><td>每次扫都按回去；边界页 E2</td></tr>
+      <tr><td>面板"整块首次出现"时，历史卡片被当成新来的</td><td>违反"保留历史"口径（误隐）</td><td>首批渲染一律算历史；边界页 E1</td></tr>
+      <tr><td>名字里带逗号 + 图片未加载时解析 <code>onclick</code></td><td>头像位取成颜色字段 → 头像判据静默失效</td><td>只按引号取参；边界页 E3</td></tr>
+    </table>
+    <p class="why">还有一个<b>没解决、需要你真机取证</b>的：审查用官方样本实测出"房间帧头像 = <code>static.codemao.cn/...bmp</code>、信箱帧头像 = <code>cartoon/600264</code>"，两者归一后<b>不相等</b> —— 若真机确认，头像这条路对信箱其实是空的（只剩名字判据），且共用预置卡通头像会误伤无关路人。探针 v3 已就绪（三个统计项自动写进 json），你跑一次我就能定论。</p>
+  </details>
+
+  <h2>这次真正买到的东西（对照 111 分钟）</h2>
+  <div class="grid k4">
+    <div class="kpi"><b class="num">2 次发版</b><span>v0.3.0 功能 + v0.3.1 审查修复，均已推 GitHub 并复核 CDN</span></div>
+    <div class="kpi"><b class="num">63 + 54</b><span>核心单测 + 联调用例，全绿（另有 3/23/7/6 四个专项页）</span></div>
+    <div class="kpi"><b class="num">4 + 4</b><span>审查抓 4 处真 bug + 评审 4 条小问题，全部修复并有回归</span></div>
+    <div class="kpi"><b class="num">3 条</b><span>沉淀：排查取舍原则、35% 工期缓冲、浏览器测试环境三坑</span></div>
+  </div>
+
+  <div class="note" style="margin-top:16px">
+    <b>一句话总结：</b>111 分钟里，<b>约 62 分钟做出了功能（56%）</b>，<b>约 23 分钟在修真 bug（21%，其中 4 处是独立审查发现的、含一条会违反你红线的）</b>，
+    剩下<b>约 26 分钟（23%）烧在测试环境上</b>——这部分下次用 <code>file://</code> 跑法可以压到几分钟。按你要的新规矩，这类项目的工期应按 <b>计划 55% + bug 缓冲 45%</b> 排。
+  </div>
+
+  <div class="foot">
+    复现方式：<code>python tools/token-report.py</code> 出成本；本页时间数据来自 <code>state.db</code> 的 <code>messages.timestamp</code> 逐条相减（会话 <code>20260926_095331_b0ab57</code>，740 条消息 / 377 次工具调用）。
+    本文件是 vibecoding 产物：需求与验收＝北海（@Northseacaviar）；分析与实现＝Corvin Hermes（基于 Nous Research 的 Hermes Agent）。
+  </div>
+</div>
+</body>
+</html>
