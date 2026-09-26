@@ -97,12 +97,17 @@
   }, 100);
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-  // 期望的默认位置：与 src 里 defaultFabPos（窄屏分支 vw<520 用 vw-FAB-8/vh-108）同一套算法，
-  // 不在夹具里写死宽屏公式（写死会让窄视口假 FAIL）
+  // 期望的默认位置：直接问插件要（v0.3.15 起导出 defaultFabPos），不再在夹具里抄公式
+  // ——抄一份的下场：实现改了、夹具还按老公式算，全绿却在真机上错位
   function expectedDefault(w, h) {
+    const A = window.__IIROSE_BLACKLIST__;
+    if (A && typeof A.defaultFabPos === 'function') {
+      const p = A.defaultFabPos();
+      if (p && typeof p.left === 'number' && typeof p.top === 'number') return p;
+    }
     const vw = window.innerWidth, vh = window.innerHeight;
     let left = vw - 60, top = vh - 260;
-    if (vw < 520) { left = vw - w - 8; top = vh - 108; }
+    if (vw < 520) { left = vw - w - 8; top = Math.round(vh / 2 - h / 2); }
     if (top < 8) top = vh - h - 60;
     const cl = (t, lo, hi) => Math.min(Math.max(lo, t), Math.max(lo, hi));
     return { left: cl(left, 4, vw - w - 4), top: cl(top, 4, vh - h - 4) };
@@ -250,6 +255,25 @@
       }
       api.setDebug(false);
     } else { log('  拿不到面板或 API，跳过', 'bad'); fail++; }
+
+    log('\n[11] 默认摆位规则：窄屏（手机）= 贴右边缘 + 竖直居中附近；宽屏 = 保持右下偏上（v0.3.15 改的，锁住口径）');
+    {
+      const d = expectedDefault(FW, FH);
+      const rightGap = vw - (d.left + FW);                    // 球右边缘到视口右边缘的距离
+      const centerOff = Math.abs((d.top + FH / 2) - vh / 2);  // 球中心离视口竖直中线的距离
+      if (vw < 520) {
+        ok(rightGap >= 0 && rightGap <= 12,
+          '手机：球贴右边缘（右边距 0~12px）', '[右边距 ' + rightGap + 'px，位置 ' + d.left + ',' + d.top + ']');
+        ok(centerOff <= FH / 2 + 6,
+          '手机：球在竖直中间附近（不贴在屏幕下沿）', '[偏离中线 ' + Math.round(centerOff) + 'px，视口高 ' + vh + ']');
+      } else {
+        ok(d.left === Math.min(Math.max(4, vw - 60), Math.max(4, vw - FW - 4)) &&
+           d.top === Math.min(Math.max(4, vh - 260), Math.max(4, vh - FH - 4)),
+          '宽屏：默认位保持原口径（vw-60 / vh-260）', '[实测 ' + d.left + ',' + d.top + ']');
+      }
+      ok(typeof (window.__IIROSE_BLACKLIST__ || {}).defaultFabPos === 'function',
+        '插件导出了 defaultFabPos（夹具不再自抄一份公式）');
+    }
 
     render();
   }

@@ -2,8 +2,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.14';
-  const VERSION_CODE = 34;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.15';
+  const VERSION_CODE = 35;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -1457,7 +1457,11 @@
   function defaultFabPos() {
     const vw = window.innerWidth || 0, vh = window.innerHeight || 0;
     let left = vw - 60, top = vh - 260;
-    if (vw < 520) { left = vw - FAB_SIZE - 8; top = vh - 108; }   // 窄屏：右下角上方，保证可见可点
+    if (vw < 520) {
+      // 手机（v0.3.15 起）：贴右边缘、竖直居中附近 —— 拇指够得着，也不压住聊天区下方的输入行
+      left = vw - FAB_SIZE - 8;
+      top = Math.round(vh / 2 - FAB_SIZE / 2);
+    }
     if (top < 8) top = vh - FAB_SIZE - 60;
     return clampToViewport(left, top, FAB_SIZE, FAB_SIZE);
   }
@@ -2085,6 +2089,8 @@
   if (!window.__IIROSE_BLACKLIST__) try {
     window.__IIROSE_BLACKLIST__ = {
       version: VERSION,
+      // 默认摆位（夹具/排障用：免得测试里再抄一份公式，抄的那份会跟实现漂移）
+      defaultFabPos: defaultFabPos,
       get store() { return store; },
       get hooked() { return isHooked(); },          // 实时判定，不是一次性闩锁
       flush: flushSave,
