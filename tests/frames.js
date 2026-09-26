@@ -26,14 +26,38 @@
       'https://static.codemao.cn/i/23/10/21/22/2620-Z1.bmp', '1700000012', uid, 'g', '2325', 'f590'].join('>');
   }
 
+  // 信箱（通知）记录（7 字段）：用户名>头像>性别>标记(+附言)>背景>时间>颜色
+  // 标记：'^ 关注 / '*' 点赞 / 'h 点踩 / '$ 转账（打赏）
+  // 注意：信箱帧【没有 uid】—— 这正是它只能按 名字/头像 认人的原因
+  function mailRec(name, avatar, marker, extra) {
+    return [name, avatar, '2', "'" + marker + (extra || ''), '', '1762613079', 'd28ad2'].join('>');
+  }
+  // 房间公告（3 字段）：公告文本>背景>时间
+  function noticeRec(text, bg, ts) {
+    return [text, bg || 'bg.png', ts || '1762613000'].join('>');
+  }
+
   return {
     ROOM_UID, PRIV_UID, OTHER_UID, THIRD_UID,
-    roomRec, privRec, danmakuRec,
+    roomRec, privRec, danmakuRec, mailRec, noticeRec,
 
     // 官方文档原样样本（回归对照，别改）
     docRoom: '"1700000011>https://static.codemao.cn/i/23/10/21/22/2620-Z1.bmp>测试甲>test>040b02>040b02>1>>a1b2c3d4e5f67>g\'91\'2325>111222333444',
     docPrivate: '""1700000013>f7e6d5c4b3a21>测试甲.‎˖٭𓂃>http://r.iirose.com/i/24/1/14/20/3912-02.jpg>test>339f88>>339f88>3>http://r.iirose.com/i/21/4/7/15/4636-YT.png>555666777888',
     docDanmaku: '=测试甲>test>040b02>040b02>1>https://static.codemao.cn/i/23/10/21/22/2620-Z1.bmp>1700000012>a1b2c3d4e5f67>g>2325>f590',
+    docMailLike: "@*测试甲>cartoon/600264>2>'*>>1762613079>d28ad2",   // 官方 docs/markdown/event/event_message.md 点赞样本
+
+    // 信箱帧构造器（'@' + 子类型字符）
+    MAIL_NAME: '测试甲',                                   // 用房间样本里的名字做被拉黑者
+    MAIL_NAME_CART: '测试甲',                           // 官方样本里的名字（卡通头像）
+    MAIL_AVATAR_CART_DOM: 'https://s.iirose.com/images/icon/cartoon/600264.jpg',   // DOM 里同一头像的形态
+    mailLike: (name, avatar) => '@*' + mailRec(name, avatar, '*'),
+    mailFollower: (name, avatar) => '@*' + mailRec(name, avatar, '^'),
+    mailDislike: (name, avatar) => '@*' + mailRec(name, avatar, 'h'),
+    mailPayment: (name, avatar, money, note) => '@*' + mailRec(name, avatar, '$' + (money || 1) + ' ' + (note || '谢谢')),
+    mailNotice: (text) => '@*' + noticeRec(text),
+    mailTwo: (nameA, avatarA, nameB, avatarB) => '@*' + mailRec(nameA, avatarA, '*') + '<' + mailRec(nameB, avatarB, '^'),
+    mailWeird: "@*不是信箱形状的东西>只有两个字段",
 
     // 多记录帧
     room3: '"' + [roomRec(OTHER_UID, '甲', 'AAA', '1700000001'),

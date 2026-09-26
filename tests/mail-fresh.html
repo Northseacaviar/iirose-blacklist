@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>iirose-blacklist 信箱边界用例（独立页：需要"面板首次出现"这种一次性时序）</title>
+<style>body{background:#111;color:#ddd;font:13px/1.6 Consolas,monospace;padding:10px}pre{white-space:pre-wrap}#box{margin-bottom:8px}</style>
+</head>
+<body>
+<div id="box">跑测试中…</div>
+<!-- 故意先不给信箱面板：下面用脚本整块插入，复现"面板第一次出现就带着历史卡片"这个时序 -->
+<div id="msgholder"><div class="msgholderBox" id="msgHolder"></div></div>
+<pre id="out"></pre>
+
+<script>
+try { localStorage.removeItem('iirose_blacklist_v1'); } catch (e) {}
+window.uid = 'myown0000001a';
+window.__RECV = [];
+window.socket = { _onmessage: function (d) { window.__RECV.push(d); }, _send: function () {}, send: function () {}, readyState: 1 };
+</script>
+<script src="../src/iirose-blacklist.js?fresh=1"></script>
+<script>
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const results = [];
+function t(name, fn) { return Promise.resolve().then(fn).then(() => results.push({ name, ok: true }), (e) => results.push({ name, ok: false, err: String((e && e.message) || e) })); }
+function ok(v, m) { if (!v) throw new Error(m || '断言失败'); }
+function eq(a, b, m) { if (a !== b) throw new Error((m || 'eq') + ' 期望=' + JSON.stringify(b) + ' 实际=' + JSON.stringify(a)); }
+
+const A = window.__IIROSE_BLACKLIST__;
+const BLOCK = 'blockedge001a', NAME = '拉黑对象';
+
+// 真机结构的信箱条目（照 2026-09-26 探针原文）
+function cardHtml(name, avatar) {
+  return '<div class="cardTagI">'
+    + '<div class="cardTagAvatar whoisTouch2" onclick="getProfile([\'' + name + '\',\'fffeff\',\'' + avatar + '\',\'2\',null])">'
+    + (avatar ? '<img src="' + avatar + '">' : '')
+    + '</div><div class="cardTagName textColor">' + name + '</div></div>';
+}
+function panelWith(name, avatar) {
+  const holder = document.createElement('div');
+  holder.id = 'leaveMsgHolder';
+  const card = document.createElement('div');
+  card.className = 'cardTag';
+  card.innerHTML = cardHtml(name, avatar);
+  holder.appendChild(card);
+  return holder;
+}
+const rowOf = (id) => document.getElementById(id);
+
+(async function () {
+  A.setEnabled(true);
+
+  // ---- E1：面板整块插入（第一次出现）+ 「保留历史」开着 → 面板里原有的历史卡片不该被隐 ----
+  await t('E1 面板首次出现就带着历史卡片：保留历史开着 → 历史留着（审查 D6 回归）', async () => {
+    A.setKeepHistory(true);
+    A.block(BLOCK, NAME);                       // 先拉黑，且此时页面上还没有信箱面板
+    await sleep(300);
+    const holder = panelWith(NAME, 'https://s.iirose.com/images/icon/cartoon/900001.jpg');
+    holder.querySelector('.cardTag').id = 'e1card';
+    document.body.appendChild(holder);          // 站点整块渲染面板：观察者只看到"面板节点"这一个新增
+    await sleep(400);
+    const card = rowOf('e1card');
+    ok(card, '卡片丢了');
+    eq(card.style.display, '', '保留历史开着，面板首批渲染的历史卡片被隐了（D6 未修）');
+    holder.parentNode.removeChild(holder);
+    A.unblock(BLOCK);
+    await sleep(200);
+  });
+
+  // ---- E2：站点重渲染把 display 改回来 → 下一次扫必须按回去（审查 D3 回归）----
+  await t('E2 站点把已隐藏卡片的 display 改回来 → 再扫一次要重新隐藏（审查 D3 回归）', async () => {
+    A.setKeepHistory(false);                    // 关 = 新旧一起隐
+    A.block(BLOCK, NAME);
+    await sleep(300);
+    const holder = panelWith(NAME, 'https://s.iirose.com/images/icon/cartoon/900001.jpg');
+    holder.querySelector('.cardTag').id = 'e2card';
+    document.body.appendChild(holder);
+    await sleep(400);
+    const card = rowOf('e2card');
+    eq(card.style.display, 'none', '关着「保留历史」却没隐');
+    card.style.display = '';                    // 模拟站点重渲染（元素还在，但 display 被改回可见）
+    A.sweep();                                  // 等价于 5 秒定时那一次全扫
+    await sleep(150);
+    eq(card.style.display, 'none', '站点重渲染后卡又露出来了，全扫没把它按回去（D3 未修）');
+    holder.parentNode.removeChild(holder);
+    A.unblock(BLOCK);
+    await sleep(200);
+  });
+
+  // ---- E3：图片没加载完时从 onclick 取头像；名字里带逗号不能把头像位切错（审查 D7 回归）----
+  await t('E3 名字里带逗号 + 图片未加载：仍取到正确头像（审查 D7 回归）', async () => {
+    A.setKeepHistory(false);
+    const holder = panelWith('甲,乙', 'https://s.iirose.com/images/icon/cartoon/900777.jpg');
+    document.body.appendChild(holder);
+    await sleep(300);
+    const rows = A._diag.mailCards().rows;
+    const mine = rows.filter((r) => r.name === '甲,乙');
+    eq(mine.length, 1, '没读到这张卡');
+    eq(mine[0].avatar, 'https://s.iirose.com/images/icon/cartoon/900777.jpg', '头像位取错了（大概率又用了 split(",")）');
+    eq(mine[0].avatarKey, '900777', '头像指纹不对');
+    holder.parentNode.removeChild(holder);
+  });
+
+  const fail = results.filter((r) => !r.ok);
+  const summary = { total: results.length, pass: results.length - fail.length, fail: fail.length, results };
+  window.__RESULT__ = summary;
+  document.getElementById('out').textContent = JSON.stringify(summary, null, 1);
+  document.getElementById('box').textContent = fail.length
+    ? ('信箱边界用例：失败 ' + fail.length + '/' + summary.total)
+    : ('信箱边界用例：通过 ' + summary.pass + '/' + summary.total);
+})();
+</script>
+</body>
+</html>
