@@ -39,6 +39,7 @@
 | A9e | 信箱卡片隐藏跟随「保留历史消息」开关：关=新旧一起隐；开=已渲染的留着、之后新来的隐 | 解除拉黑后卡片还原（只 `display:none`） |
 | A10 | 悬浮球与面板都拖不出页面：贴边 4px、贴边仍可点击、松手记住的位置不越界、面板自己长高后回到界内 | `tests/drag-clamp.html`（27 项）+ 真机四方向各拖一次 |
 | A11 | 房间屏蔽：屏蔽某房间后，各房间列表（热推/订阅/管理/历史/地图）里它的卡片隐藏；解除或关掉「启用屏蔽」即还原；别人的房间一行不动 | `tests/harness.html` W55–W65（含面板开关、孤儿兜底还原、节点复用）+ 真机逐面板跑一次 `_diag.rooms()`（看 `cardCount`、`hit/hidden/display`、`orphans`） |
+| A12 | 面板名单区：两个 tab 并排、点哪个下面就换哪一组、tab 文字带数量、重开面板停在上次的 tab；两个输入框上下常驻 | `tests/harness.html` W66–W67 + 真机开面板点两下 tab |
 
 ## 协议与实现
 
@@ -89,7 +90,8 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 
 - 本地调试：双击 `start.bat`（起 127.0.0.1:8770），站点 console 里 `js` 粘贴 `http://127.0.0.1:8770/src/iirose-blacklist.js`
 - 面板开关：**启用屏蔽 / 拉黑时保留他的历史消息 / 清除历史点播卡片 / 隐藏私聊会话条目 / 调试日志**。诊断的界面入口自 v0.3.11 起全部隐藏（代码保留），需要时用 `__IIROSE_BLACKLIST__.openDiag()` 开 760px 大字窗（可滚动、可复制全文）
-- 自测：`node tests/core.test.js`（62 项）· `tests/harness.html`（65）· `mail-pop.html`（8）· `mail-fresh.html`（4，测面板首次出现的时序）· `official-mode.html`（23）· `migration.html`（7）· `drag-clamp.html`（27）· `loader-test.html`（6）· `loader-stub.html`（16，桩造四种选版组合）· `loader-cdn.html`（走真 CDN）· `probe3-selftest.html`（11）· `probe3-selftest-b.html`（6）
+- 面板名单区（v0.3.14 起）：顶部两个 tab 并排 —— **「已拉黑用户 (N)」/「已屏蔽房间 (N)」**，点哪个下面就显示哪一组（用户组 = 已拉黑 + 最近出现；房间组 = 已屏蔽房间 + 最近出现的房间）；两个 tab 文字里直接带数量，选中的那个填红。**两个输入框一上一下常驻**，不跟着 tab 藏；面板重开后停在上次的 tab（`conf.tab` 落盘）。拉黑成功自动切到用户组、屏蔽房间成功自动切到房间组，省得手动找。
+- 自测：`node tests/core.test.js`（62 项）· `tests/harness.html`（67）· `mail-pop.html`（8）· `mail-fresh.html`（4，测面板首次出现的时序）· `official-mode.html`（23）· `migration.html`（7）· `drag-clamp.html`（27）· `loader-test.html`（6）· `loader-stub.html`（16，桩造四种选版组合）· `loader-cdn.html`（走真 CDN）· `probe3-selftest.html`（11）· `probe3-selftest-b.html`（6）
 - 浏览器夹具用 `file://` 在**前台**标签里跑（后台标签被节流，表现是「一直卡在跑测试中」）；harness 会把结果写进 localStorage 键 `bl_harness_result`，掉线重开同源页可读回。自建静态服务前先 `netstat -ano | grep :端口` 确认只有一个 LISTENING。`official-mode.html` 若同浏览器先跑过 harness（它往 localStorage 写名单）会假失败，先 `localStorage.clear()` 或换无痕窗口
 - 面板点不动的排障：`_diag.hitTest()`（是否被盖住 / 尺寸归零）、`_diag.watchClick()`（装点击探针看哪几层事件）、`sweep()` 全扫 / `debugSweep()` 逐行报告 DOM 清扫结果 / `_diag.rooms()` 逐张房间卡片报告（卡片总数、rid、名字、是否命中、是否已隐藏、孤儿节点）；`setEnabled/setDebug/setRightClick/setKeepHistory/setClearCards/setHideSession/blockRoom/unblockRoom` 是不依赖鼠标的备用入口
 
@@ -145,6 +147,7 @@ start.bat 本地托管 8770（自定义 JS 注入调试用）
 
 | tag | 内容 |
 |---|---|
+| `v0.3.16` | 插件 v0.3.14：**面板名单区改版** —— 「已拉黑用户 / 已屏蔽房间」两个 tab 并排，点哪个下面就显示哪一组列表；两个输入框改成一上一下常驻；tab 文字带数量、记住上次选的是哪个 |
 | `v0.3.15` | 插件 v0.3.13：房间屏蔽的审查加固 —— 已隐藏卡片丢 `rid` 会兜底还原（不再永久隐形）、`rid` 改写立刻重判、采集上限与写盘抑制修正、`_diag.rooms()` 报卡片数/孤儿、面板提示行显示「识别到 N 张房间卡片」 |
 | `v0.3.14` | 插件 v0.3.12：**房间屏蔽** —— 房间列表（热推/订阅/管理/历史/地图）里隐藏指定房间的卡片，可随时解除 |
 | `v0.3.12` | 插件 v0.3.11：诊断的界面入口全部隐藏，改用控制台 `openDiag()` 开大字窗 |
