@@ -153,6 +153,8 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 | 本地调试（`start.bat`） | 直接 `Ctrl+F5`，本地不经 CDN，没有 7 天缓存 |
 | 想固定某个版本 | 用 tag 地址：`.../iirose-blacklist@v0.2.3/loader.js`（或主脚本 `@v0.2.3/iirose-blacklist.js`）|
 
+**还有一道是浏览器自己的缓存（7 天）**：jsdelivr 给的是 `Cache-Control: public, max-age=604800`，所以 **loader 自己那个 URL 也会被浏览器缓存 7 天**——CDN 上已经是 v2.0，你的浏览器照样把旧的 v1.2 直接拿出来用（2026-09-26 实测：同一页面 `fetch` 拿缓存 = v1.2，加 `cache:'reload'` 回源 = v2.0）。loader 只能给**主脚本**加 `?t=` 绕缓存，它没法给自己的地址加。→ **要立刻换掉 loader，唯一办法是换地址**（钉 tag，或在地址后随便加个查询串如 `?v=2`），让浏览器当成新 URL 重新下载。
+
 **刷新了还是不生效？把地址临时钉到本次 tag**：`…iirose-blacklist@v0.3.4/loader.js` —— tag 地址是不可变的，CDN 上第一次请求必然回源，**不可能**给你旧文件（分支地址 `@main` / 不带 ref 的地址都可能被缓存最多 12 小时，且清缓存接口不保证能立刻刷掉分支解析）。
 
 **为什么"刷新了还不生效"**：jsdelivr 给的是 7 天强缓存（`Cache-Control: max-age=604800` —— 地址不变，浏览器**根本不发请求**）。loader 靠 `?t=时间戳` 每次换 URL 绕开它；直连地址只能靠改 `?v=` 或 `Ctrl+F5`（手机用无痕）。另外两个坑（无 ref 地址 = 最新 tag 的快照、`@ref` 可能被限流）写在上面「给朋友用」那三条里。
