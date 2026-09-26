@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.10';
-  const VERSION_CODE = 30;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.11';
+  const VERSION_CODE = 31;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -1345,7 +1345,7 @@
     });
     const debugToggle = toggleRow('debug', '调试日志', !!store.conf.debug, (on) => {
       store.conf.debug = on; saveStore(); log('调试日志', on);
-      setStatus(on ? '调试日志已开（面板底部有「信箱诊断」，控制台也会打统计）' : '调试日志已关', '#999');
+      setStatus(on ? '调试日志已开（统计打到控制台；面板内的诊断显示已隐藏）' : '调试日志已关', '#999');
       setTimeout(() => { refreshStats(); }, 30);
     }, true);
     swRow.appendChild(enableToggle); swRow.appendChild(debugToggle);
@@ -1419,10 +1419,16 @@
       cursor: 'pointer', userSelect: 'text', WebkitUserSelect: 'text',
     });
     panel.appendChild(mailDiagBox);
+    // v0.3.11（北海 2026-09-26：信箱诊断平时用不到，一起隐藏）：面板里不再显示这块诊断文本，
+    // 连着开着调试日志也不显示。内容随时可读，走控制台：
+    //   __IIROSE_BLACKLIST__._diag.mailCards() / .rawStats()   看逐条判定与统计
+    //   __IIROSE_BLACKLIST__.openDiag()                         开 760px 大字窗口（可复制/截图）
+    // 要恢复面板内显示：把下面那行 display='block' 放开即可（代码都留着）。
     function refreshMailDiag() {
-      if (!store.conf.debug) { mailDiagBox.style.display = 'none'; return; }
-      mailDiagBox.style.display = 'block';
+      mailDiagBox.style.display = 'none';
+      if (!store.conf.debug) return;
       mailDiagBox.textContent = mailDiagText() + '\n（点这里开大字窗口，可截图可复制）';
+      // mailDiagBox.style.display = 'block';      // ← 放开这行即恢复面板内显示
     }
 
     // 复用到剪贴板：navigator.clipboard 优先，失败退回临时 textarea（Promise 的拒绝 try/catch 抓不到，必须显式接）
@@ -1705,7 +1711,7 @@
       statusMsg('面板位置已记住', '#68b26d');
     });
 
-    ui = { panel, fab, setStatus, refreshAll, refreshSeen, refreshStats, refreshBlacklist, diagLine };
+    ui = { panel, fab, setStatus, refreshAll, refreshSeen, refreshStats, refreshBlacklist, diagLine, openDiag };
     refreshAll();
   }
 
@@ -1800,6 +1806,8 @@
       // 内部函数直通（真机排障用，便于逐行验证判断链）
       storage: function () { return { mode: storageMode, label: storageLabel(), key: STORE_KEY }; },
       pkg: function () { return { name: PKG_NAME, meta: PKG_META, installed: !!service }; },
+      // 大字窗口的排障入口（面板上的按钮与诊断块 v0.3.11 起都隐藏了，只剩这一条路）
+      openDiag: function () { try { if (ui && ui.openDiag) ui.openDiag(); } catch (e) { } },
       _diag: {
         uidOfMessageNode: uidOfMessageNode,
         isCardRow: isCardRow,
