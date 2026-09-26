@@ -113,6 +113,11 @@ const pop40 = () => S.pops.filter((p) => p[0] === 40 && p[1]).length;
     ok(S.mail[0].indexOf(NAME) >= 0, '传给站点的记录里没有这个人');
     eq(S.coin, 3, '钱没进站点账（Variable.coin 没累加）');
     eq(A._diag.mailSilence().installed.panelAnimate, true, '')
+    // 诊断文本（面板"调试日志"开着时显示同一份）：必须把装闸状态、类型、判定都写出来
+    const dt = A._diag.mailDiagText();
+    ok(/装闸：弹面板✓/.test(dt), '诊断没报出"弹面板闸已装"：' + dt.replace(/\n/g, ' | '));
+    ok(/payment/.test(dt), '诊断没认出类型是转账：' + dt.replace(/\n/g, ' | '));
+    ok(/判定：.*开闸/.test(dt), '诊断没报出开闸：' + dt.replace(/\n/g, ' | '));
     const card = document.querySelector('#leaveMsgHolder .cardTag');
     ok(card, '卡片没进 DOM');
     eq(card.style.display, 'none', '卡片没被隐');
