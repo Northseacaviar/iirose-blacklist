@@ -60,7 +60,7 @@
 
 **形状判定按特征找、不认死下标**（v0.3.7 真机修正）：名字 = 第 0 格；标记 = **第 1~5 格里第一个以 `'` 开头的格子**（其第 2 字符 = 类型）；整条记录必须同时出现 9~11 位数字（时间戳）与 6 位 hex（颜色）；格子数 4~9，超出范围或凑不齐特征 = 形状不认识 → 放行。够严（房间公告那种被 `>` 切碎的长文本凑不出整套）也够宽（5/6/7 格真帧都认）。
 
-**信箱实现要点**：`filterMailFrame()` 逐记录判定（`mailRecordInfo()` 认形状、`mailHit()` 比名字）；界面层 `sweepMailCards()` 接进 `sweepAll()` 与 MutationObserver 的增量路径，解除拉黑/关掉屏蔽时还原。被屏蔽者来信箱时用 600ms「静默闸」吞掉站点那三件事（`panelAnimate(40,1)`、`Utils.Resource.notiSound("mail")`、`homeHolder.push(Constant.NOTIFY.MAIL)`）：每窗最多吞一次，用户自己点开不会被连吞；帧本身照旧透传（金币加法、落盘、卡片渲染都没变）。排障出口：`_diag.mailCards()` / `_diag.sweepMail()` / `_diag.mailSilence()` / `_diag.mailDiagText()`。真机抓帧工具 `docs/探针-信箱3-真帧.js`，日常排障开大字窗口：`__IIROSE_BLACKLIST__.openDiag()`。
+**信箱实现要点**：`filterMailFrame()` 逐记录判定（`mailRecordInfo()` 认形状、`mailHit()` 比名字）；界面层 `sweepMailCards()` 接进 `sweepAll()` 与 MutationObserver 的增量路径，解除拉黑/关掉屏蔽时还原。被屏蔽者来信箱时用 600ms「静默闸」吞掉站点那三件事（`panelAnimate(40,1)`、`Utils.Resource.notiSound("mail")`、`homeHolder.push(Constant.NOTIFY.MAIL)`）：每窗最多吞一次，用户自己点开不会被连吞；帧本身照旧透传（金币加法、落盘、卡片渲染都没变）。排障出口：`_diag.mailCards()` / `_diag.sweepMail()` / `_diag.mailSilence()` / `_diag.mailDiagText()`。真机抓帧工具 `docs/探针-信箱3-真帧.js`（本机留档，不入库），日常排障开大字窗口：`__IIROSE_BLACKLIST__.openDiag()`。
 
 兜底：DOM 清扫 + MutationObserver（参照 iiroseForge `enableBlacklist()` 的 `.msgholderBox` / `.msg` / `dataset.id = uid_消息id` 结构）。uid 优先取头像上的 `data-uid`，`data-id` 只作兜底（它含下划线时会切出假 uid）。点播卡片行**没有 `data-id`**，但行内深处（`.msgavatar` / `PubChatUserSettings`）带 `data-uid`，且行内必有 `systemCardMediaShare*` 类名 —— 两者一配即可按 uid 归属。
 
@@ -73,11 +73,12 @@ mobile-probe.js 手机端排障探针：进站注入后页面顶部挂红条，�
 tests/    子测试：Node 单测（提取 #region CORE / #region STORAGE）+ 浏览器假 socket 联调 harness
           + official-mode.html（官方插件形态：假 Ext.Service，验合规与存储）
           + loader-test.html（loader 本地路径 6 项）+ loader-cdn.html（loader 走 CDN 实链 = 朋友路径）
-docs/     调研笔记、审查报告、成本账（docs/成本账.md = token 与估算花费）
 release/  发布件（推 GitHub / jsdelivr 用）
 tools/    publish.js（发布件同步，--check 只校验）、token-report.py（从 Hermes state.db 只读统计本项目用量）
 start.bat 本地托管（自定义 JS 注入调试用）
 ```
+
+过程产物（调研笔记、审查报告、复盘页、成本账、探针脚本）只留本机 `docs/`，**不入库**。
 
 ## 发布（改完代码怎么做）
 
@@ -200,11 +201,11 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/mobile-probe.js
 
 ## 成本
 
-本项目的 token 与花费由脚本直查本机 Hermes 会话库生成（只读），明细见 [`docs/成本账.md`](docs/成本账.md)。
+本项目的 token 与花费由脚本直查本机 Hermes 会话库生成（只读），明细见本机 `docs/成本账.md`（未入库）。
 
 <!-- COST:BEGIN 由 tools/token-report.py --readme 生成，别手改 -->
 - 截至 2026-09-26 16:16（北京时间）：估算花费 **$2.1755**（≈15 元人民币）· 消息 1,478 · 工具调用 755
-- 结构：主开发会话 $1.81 ／ 子 agent 独立审查 $0.26 ／ 部分相关折算 $0.10（明细见 [`docs/成本账.md`](docs/成本账.md)）
+- 结构：主开发会话 $1.81 ／ 子 agent 独立审查 $0.26 ／ 部分相关折算 $0.10（明细见本机 `docs/成本账.md`，未入库）
 - 口径：`estimated_cost_usd` 是**估算不是账单**；`reasoning_tokens` 通常已含在输出口径里；缓存读占 ~98%，所以「总 token 近亿」不等于贵。
 - 复现：`python tools/token-report.py`（屏幕）· `--doc docs/成本账.md`（重写成本账）· `--readme README.md`（刷新本段）
 <!-- COST:END -->

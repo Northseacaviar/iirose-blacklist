@@ -190,7 +190,7 @@ _cost_main = _cat(['主会话', 'cwd 命中', '关键词命中'])
 _cost_sub = _cat(['子 agent'])
 _cost_part = _cat(['部分相关'])
 readme_body = ('- 截至 %s（北京时间）：估算花费 **$%.4f**（≈%.0f 元人民币）· 消息 %s · 工具调用 %s\n'
-               '- 结构：主开发会话 $%.2f ／ 子 agent 独立审查 $%.2f ／ 部分相关折算 $%.2f（明细见 [`docs/成本账.md`](docs/成本账.md)）\n'
+               '- 结构：主开发会话 $%.2f ／ 子 agent 独立审查 $%.2f ／ 部分相关折算 $%.2f（明细见本机 `docs/成本账.md`，未入库）\n'
                '- 口径：`estimated_cost_usd` 是**估算不是账单**；`reasoning_tokens` 通常已含在输出口径里；缓存读占 ~98%%，所以「总 token 近亿」不等于贵。\n'
                '- 复现：`python tools/token-report.py`（屏幕）· `--doc docs/成本账.md`（重写成本账）· `--readme README.md`（刷新本段）'
                % (now_str, T['cost'], cny, format(T['msg'], ','), format(T['tool'], ','),
