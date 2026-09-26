@@ -46,12 +46,18 @@ function curl(url) {
   for (const h of HOSTS) {
     for (const p of PATHS) {
       if (!/iirose-blacklist\.js$/.test(p)) continue;
-      const body = curl('https://' + h + '/gh/' + REPO + '/' + p + '?t=' + Date.now());
-      const got = (body.match(/const VERSION = '([^']+)'/) || [])[1];
+      let got = '', lastBody = '';
+      const url = 'https://' + h + '/gh/' + REPO + '/' + p + '?t=' + Date.now();   // 重试复用同一地址：
+      // 第一次成功后 CDN 就有这份缓存了；每次换时间戳会逼 CDN 反复回源，反倒容易被它回 "Couldn't find the requested file"
+      for (let attempt = 0; attempt < 3 && !got; attempt++) {
+        const body = curl(url);
+        got = (body.match(/const VERSION = '([^']+)'/) || [])[1] || '';
+        if (!got) { lastBody = body; await new Promise((r) => setTimeout(r, 6000)); }
+      }
       const okv = got === want;
       if (!okv) bad++;
       console.log((okv ? '一致  ' : '落后  ') + h + ' / ' + p + ' → '
-        + (got || ('取不到（' + (body ? body.replace(/\s+/g, ' ').slice(0, 80) : '空响应，可能被限流') + '）')));
+        + (got || ('取不到（' + (lastBody ? lastBody.replace(/\s+/g, ' ').slice(0, 80) : '空响应') + '）')));
       await new Promise((r) => setTimeout(r, 1200));   // 别连发，jsdelivr 对突发请求会限流
     }
   }
