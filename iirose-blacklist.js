@@ -2,8 +2,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.12';
-  const VERSION_CODE = 32;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.13';
+  const VERSION_CODE = 33;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -94,7 +94,7 @@
       seen: Object.create(null),      // uid -> { name, ts }  最近见过的人（用于面板里按名字拉黑）
       rids: Object.create(null),      // 房间 id -> { name, ts }  已屏蔽房间
       rooms: Object.create(null),     // 房间 id -> { name, ts }  最近出现过的房间（供面板挑选）
-      counters: { room: 0, priv: 0, danmaku: 0, dom: 0, mail: 0, abnormal: 0, err: 0 },
+      counters: { room: 0, priv: 0, danmaku: 0, dom: 0, mail: 0, roomCard: 0, abnormal: 0, err: 0 },
       conf: {
         confVersion: CONF_VERSION,   // 见顶部说明：用来区分"用户显式选择"与"上一版的默认值"
         debug: false,
@@ -123,12 +123,12 @@
       s.seen[k] = { name: it.name ? String(it.name) : '', ts: Number(it.ts) || 0 };
     }
     for (const k in (raw.rids || {})) {
-      if (!k) continue;
+      if (!k || !isPlainMap(raw.rids)) continue;
       const it = raw.rids[k] || {};
       s.rids[k] = { name: it.name ? String(it.name) : '', ts: Number(it.ts) || Date.now() };
     }
     for (const k in (raw.rooms || {})) {
-      if (!k) continue;
+      if (!k || !isPlainMap(raw.rooms)) continue;
       const it = raw.rooms[k] || {};
       s.rooms[k] = { name: it.name ? String(it.name) : '', ts: Number(it.ts) || 0 };
     }
@@ -159,15 +159,20 @@
     return !!(uid && obj && Object.prototype.hasOwnProperty.call(obj, uid));
   }
 
+  // 落盘字段必须是"普通映射"：字符串/数组会被 for...in 拆成 '0','1','2' 这种垃圾键
+  function isPlainMap(v) {
+    return !!v && typeof v === 'object' && !Array.isArray(v);
+  }
+
   // 注意签名是两参 (store, uid)；运行时请用下方的单参包装 isBlocked(uid)——
   // 写成 isBlockedIn(uid) 会把 uid 当 store，条件恒为假且不报错（踩过这个坑，静默失效）
   function isBlockedIn(store, uid) {
     return hasUid(store.uids, uid);
   }
 
-  // 同上：两参签名，运行时用单参包装 isRoomBlocked(rid)
+  // 同上：两参签名，运行时用单参包装 isRoomBlocked(rid)；rid 大小写/空白在这里归一
   function isRoomBlockedIn(store, rid) {
-    return hasUid(store.rids, rid);
+    return hasUid(store.rids, normRid(rid));
   }
 
   // 帧里的名字是 HTML 转义的；这里只做显示用还原（不 innerHTML，不会注入）
@@ -203,19 +208,28 @@
     return typeof r === 'string' && /^[a-f0-9]{10,24}_?$/.test(r);
   }
 
+  // 房间 id 归一：去空白 + 统一小写（名单与卡片两侧都过这道，免得大小写不同看起来"没生效"）
+  function normRid(r) {
+    return typeof r === 'string' ? r.trim().toLowerCase() : '';
+  }
+
   // 房间采集：同一房间 30 秒内不重复刷新时间戳，免得每 5 秒清扫都写一次盘。
   // 返回 true = 本次真的写入了（调用方据此决定要不要回写落盘/刷新面板）
   const ROOM_SEEN_GAP_MS = 30000;
+  // 房间单独给上限：站内房间数百个，与人的 seen 共用 300 会每轮淘汰、变成每 5 秒全量写盘
+  const MAX_ROOM_SEEN = 800;
   function recordSeenRoom(store, rid, name) {
+    rid = normRid(rid);
     if (!rid) return false;
     const old = store.rooms[rid];
     const now = Date.now();
-    if (old && (now - (old.ts || 0)) < ROOM_SEEN_GAP_MS && (old.name || '') === (name || '')) return false;
-    store.rooms[rid] = { name: name || (old && old.name) || '', ts: now };
+    const finalName = name || (old && old.name) || '';    // 比的是最终落盘值，不是入参（站点先渲染骨架时 name 是空串）
+    if (old && (now - (old.ts || 0)) < ROOM_SEEN_GAP_MS && (old.name || '') === finalName) return false;
+    store.rooms[rid] = { name: finalName, ts: now };
     const keys = Object.keys(store.rooms);
-    if (keys.length > MAX_SEEN) {
+    if (keys.length > MAX_ROOM_SEEN) {
       keys.sort((a, b) => (store.rooms[a].ts || 0) - (store.rooms[b].ts || 0));
-      for (let i = 0; i < keys.length - MAX_SEEN; i++) delete store.rooms[keys[i]];
+      for (let i = 0; i < keys.length - MAX_ROOM_SEEN; i++) delete store.rooms[keys[i]];
     }
     return true;
   }
@@ -916,10 +930,11 @@
   }
 
   /* ------------------------------------------------------------------
-   * 房间卡片：所有房间列表（热推/订阅/管理/历史/地图树/选房器）共用同一套模板
-   *   .mapHolderRoomListItem.shopItem[rid=房间id]
-   * 判据：rid 精确相等 —— 房间名只用于显示与"按名字屏蔽"的查找（重名不稀奇）
+   * 房间卡片：房间列表（热推/订阅/管理/历史/地图树/选房器，来自站内模板说明）共用同一套卡片
+   *   模板形态 .mapHolderRoomListItem.shopItem[rid=房间id]（选择器只用前两个条件里的第一个 + rid）
+   * 判据：rid 精确相等（去空白、统一小写）—— 房间名只用于显示与"按名字屏蔽"的查找（重名不稀奇）
    * 处理方式同信箱卡片：display:none + 标记，不删节点，解除/关屏蔽可还原
+   * 注意：只有热推那一处做过真机取证，覆盖不到的部分见 README「真机待验证项」
    * ------------------------------------------------------------------ */
   const ROOM_CARD_SEL = '.mapHolderRoomListItem[rid]';
 
@@ -933,12 +948,19 @@
     return rows;
   }
 
-  // 卡片里的房间名 = 文字区第一行（读不到就退整卡文本，只用于显示）
+  // 卡片里的房间名 = 文字区第一行；读不到就找第一个"短文本"子元素当名字
+  // （宁可留空，也不要把人数/按钮文案整卡拼进来 —— 那会让按名字查找找不到）
   function roomCardName(node) {
     try {
       const n = node.querySelector ? node.querySelector('.textOverflowEllipsis') : null;
       let t = n ? String(n.textContent || '') : '';
-      if (!t) t = String(node.textContent || '');
+      if (!t && node.querySelectorAll) {
+        const cands = node.querySelectorAll('div,span,a');
+        for (let i = 0; i < cands.length; i++) {
+          const s = String(cands[i].textContent || '').replace(/\s+/g, ' ').trim();
+          if (s && s.length <= 30) { t = s; break; }
+        }
+      }
       return t.replace(/\s+/g, ' ').trim().slice(0, 24);
     } catch (e) { return ''; }
   }
@@ -960,21 +982,36 @@
     return 1;
   }
 
-  // 扫房间卡片：命中的隐藏、采集到的进"最近出现的房间"、非命中/已解除的还原
-  function sweepRoomCards(scope) {
+  // 扫房间卡片：命中的隐藏、采集到的进"最近出现的房间"、非命中/已解除的还原。
+  // full=true（默认在 scope 为空时）额外做两件事：兜底还原"带标记却已不满足选择器"的孤儿节点、报告卡片总数
+  function sweepRoomCards(scope, full) {
+    if (full === undefined) full = !scope;
     const rows = roomCards(scope);
-    let n = 0, fresh = false;
+    let hid = 0, fresh = 0;
     rows.forEach((row) => {
-      const rid = row.getAttribute ? String(row.getAttribute('rid') || '') : '';
+      const rid = normRid(row.getAttribute ? row.getAttribute('rid') : '');
       if (!rid) return;
       if (recordSeenRoom(store, rid, roomCardName(row))) fresh = true;
       const hit = store.enabled && isRoomBlocked(rid);
       if (!hit) { showRoomCard(row); return; }
-      n += hideRoomCard(row);
+      hid += hideRoomCard(row);
     });
+    // 兜底还原：站点若把已隐藏卡片的 rid/类名改掉，它就再也不满足选择器了，
+    // 只有这条路径能把它放出来；仍命中名单的照旧留着隐藏。
+    if (full) {
+      try {
+        Array.prototype.forEach.call(document.querySelectorAll('[data-bl-room-hidden]'), (n) => {
+          if (rows.indexOf(n) >= 0) return;
+          if (store.enabled && isRoomBlocked(normRid(n.getAttribute ? n.getAttribute('rid') : ''))) return;
+          showRoomCard(n);
+        });
+      } catch (e) { noteError('房间卡片兜底还原', e); }
+    }
+    // 计数只在整页清扫时更新（增量清扫只看到局部，报出来的数会小得没意义）
+    if (full && ui && ui.setCardCount) { try { ui.setCardCount(rows.length); } catch (e) { } }
     if (fresh) { saveStore(); if (ui && ui.refreshRoomSeen) { try { ui.refreshRoomSeen(); } catch (e) { } } }
-    if (n) { addCounter('dom', n); saveStore(); if (ui && ui.refreshStats) ui.refreshStats(); }
-    return n;
+    if (hid) { addCounter('roomCard', hid); saveStore(); if (ui && ui.refreshStats) ui.refreshStats(); }
+    return hid;
   }
 
   // 排障用：只留最近 20 条，避免长挂机时无限累积（生产路径每 5 秒都会 push）
@@ -1039,9 +1076,10 @@
     try { mail = sweepMailCards(null, false); } catch (e) { noteError('信箱卡片清扫', e); }
     try { hideSessionNodes(); } catch (e) { noteError('会话项清扫', e); }
     let rooms = 0;
-    try { rooms = sweepRoomCards(null); } catch (e) { noteError('房间卡片清扫', e); }
-    if (removed || mail) log('清扫历史消息', removed, '条', mail ? ('+ 信箱卡片 ' + mail + ' 条') : '');
-    return removed + mail + rooms;
+    try { rooms = sweepRoomCards(null, true); } catch (e) { noteError('房间卡片清扫', e); }
+    if (removed || mail || rooms) log('清扫历史消息', removed, '条', mail ? ('+ 信箱卡片 ' + mail + ' 条') : '', rooms ? ('+ 房间卡片 ' + rooms + ' 张') : '');
+    // 返回值只算"删掉的消息 + 隐藏的信箱卡片"：房间卡片是隐藏类操作，单独计数，别混进来
+    return removed + mail;
   }
 
   // 会话项扫描按 500ms 节流；消息清扫在观察者里按节点就地做，不整体重扫
@@ -1066,7 +1104,11 @@
         let sawIp = false;
         for (let i = 0; i < muts.length; i++) {
           const m = muts[i];
-          if (m.type === 'attributes') { sawIp = true; continue; }
+          if (m.type === 'attributes') {
+            // rid 被改写（虚拟列表复用节点）：立刻按新 rid 重扫这张卡，最长 5 秒的错隐/错现窗口就没了
+            if (m.attributeName === 'rid' && m.target) sweepRoomCards(m.target);
+            sawIp = true; continue;
+          }
           const added = m.addedNodes;
           for (let j = 0; j < added.length; j++) {
             const n = added[j];
@@ -1082,7 +1124,7 @@
         }
         if (sawIp) scheduleSessionSweep();
       });
-      obs.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['ip', 'data-uid'] });
+      obs.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['ip', 'data-uid', 'rid'] });
       sweepAll();
       // 兜底：每 5 秒整体扫一次 + 自检收包过滤是否还在（站点重连/重建 socket 会丢掉包装）
       setInterval(() => {
@@ -1446,7 +1488,7 @@
     const enableToggle = toggleRow('enabled', '启用屏蔽', store.enabled, (on) => {
       store.enabled = on; saveStore();
       log('屏蔽开关', on);
-      setStatus(on ? '已开启屏蔽' : '已关闭屏蔽（名单保留）', on ? '#68b26d' : '#d0a04a');
+      setStatus(on ? '已开启屏蔽' : '已关闭屏蔽（名单保留；消息历史、会话项与房间卡片已还原）', on ? '#68b26d' : '#d0a04a');
       // 信箱卡片是"隐藏"不是"删除"：关掉屏蔽时还原回去（聊天区已清掉的行没法回来，这里能）
       setTimeout(() => { sweepAll(); }, 50);
     });
@@ -1531,9 +1573,17 @@
     roomAddRow.appendChild(roomInput); roomAddRow.appendChild(roomAddBtn);
     panel.appendChild(roomAddRow);
 
-    const roomTip = el('div', { padding: '0 12px 6px', color: '#7f8794', fontSize: '11px' },
-      '打开一次房间列表（热推/地图）就会收进下面的「最近出现的房间」（新房间会实时进来）');
+    // 提示行随手带一句"页面上识别到几张卡"：选择器若和真机结构不符，这里会显示 0 —— 一眼看出是没打开列表还是真失效
+    let roomCardsOnPage = -1;
+    function refreshRoomTip() {
+      roomTip.textContent = (roomCardsOnPage < 0 ? ''
+        : roomCardsOnPage > 0 ? ('页面上识别到 ' + roomCardsOnPage + ' 张房间卡片。')
+          : '页面上暂时没识别到房间卡片（打开一次热推/地图就会出来；列表开着仍是 0 就是站点结构变了，去控制台跑 _diag.rooms()）。')
+        + '屏蔽的房间会从列表里隐藏，随时可解除。';
+    }
+    const roomTip = el('div', { padding: '0 12px 6px', color: '#7f8794', fontSize: '11px' });
     panel.appendChild(roomTip);
+    refreshRoomTip();
 
     const roomHead = el('div', { padding: '6px 12px', color: '#c9b48a', fontWeight: '700', borderTop: '1px solid #2a2b33' }, '已屏蔽房间 (0)');
     panel.appendChild(roomHead);
@@ -1664,7 +1714,7 @@
       padding: '5px 10px', cursor: 'pointer', fontSize: '11px',
     }, '清空统计');
     onPress(resetBtn, () => {
-      store.counters = { room: 0, priv: 0, danmaku: 0, dom: 0, mail: 0, abnormal: 0, err: 0 }; saveStore(); refreshAll();
+      store.counters = { room: 0, priv: 0, danmaku: 0, dom: 0, mail: 0, roomCard: 0, abnormal: 0, err: 0 }; saveStore(); refreshAll();
       setStatus('统计已清零', '#68b26d');
     });
     foot.appendChild(copyBtn); foot.appendChild(diagBtn); foot.appendChild(resetBtn);
@@ -1724,20 +1774,24 @@
 
     function refreshRoomSeen() {
       roomSeenList.innerHTML = '';
-      const keys = Object.keys(store.rooms)
-        .filter((r) => !isRoomBlocked(r))
+      const all = Object.keys(store.rooms).filter((r) => !isRoomBlocked(r));
+      const keys = all
         .sort((a, b) => (store.rooms[b].ts || 0) - (store.rooms[a].ts || 0))
         .slice(0, 60);
-      roomSeenHead.textContent = '最近出现的房间 (' + keys.length + ')';
+      // 标题用总数（不是截断后的条数），否则收进来的房间多于 60 时数字会骗人
+      roomSeenHead.textContent = '最近出现的房间 (' + all.length + (all.length > keys.length ? '，显示 ' + keys.length + ' 个' : '') + ')';
       if (!keys.length) { roomSeenList.appendChild(el('div', { padding: '8px 12px', color: '#666' }, '（还没收到房间卡片：先打开一次热推/地图）')); return; }
       keys.forEach((rid) => {
         roomSeenList.appendChild(row(rid, store.rooms[rid].name, '屏蔽', '#c9b48a', () => { blockRoom(rid, store.rooms[rid].name); }));
       });
     }
 
+    function setCardCount(n) { roomCardsOnPage = Number(n) || 0; refreshRoomTip(); }
+
     function refreshStats() {
       const c = store.counters;
       let t = '已屏蔽：房间 ' + c.room + ' · 私聊 ' + c.priv + ' · 弹幕 ' + c.danmaku + ' · 历史/会话 ' + c.dom;
+      if (c.roomCard) t += ' · 房间卡 ' + c.roomCard;
       if (c.abnormal) t += ' · 可疑帧 ' + c.abnormal;
       if (c.err) t += ' · 异常 ' + c.err;
       stats.textContent = t;
@@ -1778,14 +1832,17 @@
     onPress(addBtn, doAdd);
     input.onkeydown = (e) => { if (e.key === 'Enter') doAdd(); };
 
-    // 房间屏蔽的输入：房间 id 直接可用；名字要先在「最近出现的房间」里见过（同 findUidByName 的口径）
+    // 房间屏蔽的输入：见过的房间 id 一律直通（形态再怪也能屏蔽，见 M-4）；
+    // 否则按形态当 id；再否则按名字找（名字要先在「最近出现的房间」里见过，同 findUidByName 的口径）
     const doAddRoom = () => {
       const v = roomInput.value.trim();
+      const nv = normRid(v);
       if (!v) { setStatus('请输入房间 id 或房间名', '#ec4141'); return; }
-      if (looksLikeRid(v)) { blockRoom(v, (store.rooms[v] || {}).name || ''); }
+      if (hasUid(store.rooms, nv) || hasUid(store.rids, nv)) { blockRoom(nv, (store.rooms[nv] || {}).name || ''); }
+      else if (looksLikeRid(nv)) { blockRoom(nv, ''); }
       else {
         const r = findRidByName(store, v);
-        if (!r.rid) { setStatus('没找到叫「' + v + '」的房间（先打开一次房间列表，或直接输房间 id）', '#ec4141'); return; }
+        if (!r.rid) { setStatus('没找到叫「' + v + '」的房间（先打开一次房间列表，或直接粘房间 id）', '#ec4141'); return; }
         blockRoom(r.rid, v);
         if (r.hits.length > 1) setStatus('同名房间 ' + r.hits.length + ' 个，已屏蔽最近出现的那个', '#d0a04a');
       }
@@ -1892,7 +1949,7 @@
       statusMsg('面板位置已记住', '#68b26d');
     });
 
-    ui = { panel, fab, setStatus, refreshAll, refreshSeen, refreshStats, refreshBlacklist, refreshRooms, refreshRoomSeen, diagLine, openDiag };
+    ui = { panel, fab, setStatus, refreshAll, refreshSeen, refreshStats, refreshBlacklist, refreshRooms, refreshRoomSeen, setCardCount, refreshRoomTip, diagLine, openDiag };
     refreshAll();
   }
 
@@ -1928,24 +1985,26 @@
 
   /* ---------------- 屏蔽 / 解除 房间 ---------------- */
   function blockRoom(rid, name) {
-    if (!rid || typeof rid !== 'string') { statusMsg('房间 id 不合法：' + rid, '#ec4141'); return; }
+    rid = normRid(rid);
+    if (!rid) { statusMsg('房间 id 不合法：' + rid, '#ec4141'); return; }
     if (isRoomBlocked(rid)) { statusMsg('这个房间已在屏蔽名单里', '#d0a04a'); return; }
     store.rids[rid] = { name: name || (store.rooms[rid] || {}).name || '', ts: Date.now() };
     saveStore();
     log('屏蔽房间', rid, name || '');
     statusMsg('已屏蔽房间 ' + (name || rid), '#68b26d');
     if (ui) { ui.refreshAll(); }
-    try { sweepRoomCards(null); } catch (e) { noteError('屏蔽房间后的清扫', e); }
+    try { sweepRoomCards(null, true); } catch (e) { noteError('屏蔽房间后的清扫', e); }
   }
 
   function unblockRoom(rid) {
+    rid = normRid(rid);
     if (!hasUid(store.rids, rid)) return;
     delete store.rids[rid];
     saveStore();
     log('解除屏蔽房间', rid);
     statusMsg('已解除房间 ' + rid + '（列表里立刻恢复显示）', '#68b26d');
     if (ui) { ui.refreshAll(); }
-    try { sweepRoomCards(null); } catch (e) { noteError('恢复房间卡片', e); }
+    try { sweepRoomCards(null, true); } catch (e) { noteError('恢复房间卡片', e); }
   }
 
   function statusMsg(t, c) { if (ui) ui.setStatus(t, c); else log(t); }
@@ -1982,7 +2041,7 @@
       flush: flushSave,
       // 5 个开关的非鼠标入口（面板点不动时的备用路径，也是排障对照：API 生效但点击不生效 → 事件被站点吞了）
       // 非布尔入参一律忽略并返回当前值：绝不因误传（0/undefined/'yes'）切到会删记录/关掉屏蔽的方向
-      setEnabled: function (v) { if (typeof v !== 'boolean') return store.enabled; store.enabled = v; saveStore(); if (ui) ui.refreshAll(); try { sweepAll(); } catch (e) { } return v; },
+      setEnabled: function (v) { if (typeof v !== 'boolean') return store.enabled; store.enabled = v; saveStore(); if (ui) ui.refreshAll(); try { sweepAll(); } catch (e) { noteError('开关清扫', e); } return v; },
       setDebug: function (v) { if (typeof v !== 'boolean') return !!store.conf.debug; store.conf.debug = v; saveStore(); if (ui) ui.refreshAll(); return v; },
       setKeepHistory: function (v) { if (typeof v !== 'boolean') return store.conf.keepHistory !== false; store.conf.keepHistory = v; saveStore(); if (ui) ui.refreshAll(); if (!v) sweepAll(); return v; },
       setClearCards: function (v) { if (typeof v !== 'boolean') return store.conf.clearCards !== false; store.conf.clearCards = v; saveStore(); if (ui) ui.refreshAll(); if (v) sweepAll(); return v; },
@@ -2063,16 +2122,30 @@
           };
         },
         sweepMail: function () { return sweepMailCards(document, false); },
-        sweepRooms: function () { return sweepRoomCards(document); },
+        sweepRooms: function () { return sweepRoomCards(null, true); },
         // 房间卡片逐条报告：rid、名字、是否命中、是否已隐藏、display —— 定位"为什么这张没藏"
+        // orphans：带隐藏标记却已不满足选择器的节点（站点改写过 rid/类名），它们是"永久隐形"的唯一来源
         rooms: function () {
           const rows = roomCards(document);
           const rids = {};
           for (const k in store.rids) rids[k] = (store.rids[k] || {}).name || '';
+          const orphans = [];
+          try {
+            Array.prototype.forEach.call(document.querySelectorAll('[data-bl-room-hidden]'), (n) => {
+              if (rows.indexOf(n) >= 0) return;
+              orphans.push({
+                cls: String((n.className || '')).slice(0, 40),
+                rid: String((n.getAttribute && n.getAttribute('rid')) || ''),
+                display: n.style.display || '',
+              });
+            });
+          } catch (e) { }
           return {
             enabled: !!store.enabled,
             blocked: rids,
             seen: Object.keys(store.rooms).length,
+            cardCount: rows.length,
+            orphans: orphans,
             rows: rows.map((row) => {
               const rid = String((row.getAttribute && row.getAttribute('rid')) || '');
               return {

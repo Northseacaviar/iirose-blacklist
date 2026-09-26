@@ -10,7 +10,7 @@ const F = require('./frames.js');
 const EXPORTS = ['defaultStore', 'normalizeStore', 'isBlockedIn', 'hasUid', 'unescapeHtml',
   'recordSeen', 'looksLikeUid', 'filterFrame', 'findUidByName', 'isRecordShaped', 'findBlockedToken', 'MAX_SEEN',
   'mailRecordInfo', 'mailHit', 'filterMailFrame',
-  'looksLikeRid', 'isRoomBlockedIn', 'recordSeenRoom', 'findRidByName', 'ROOM_SEEN_GAP_MS'];
+  'looksLikeRid', 'normRid', 'isRoomBlockedIn', 'recordSeenRoom', 'findRidByName', 'ROOM_SEEN_GAP_MS', 'MAX_ROOM_SEEN'];
 
 function loadCore() {
   const src = fs.readFileSync(SRC, 'utf8');
@@ -376,11 +376,13 @@ t('recordSeenRoom：30 秒内不重复刷新（省落盘），换名字要更新
   s.rooms['a1b2c3d4e5f6'].ts = Date.now() - L.ROOM_SEEN_GAP_MS - 1000;
   eq(L.recordSeenRoom(s, 'a1b2c3d4e5f6', '改名了'), true, '超过间隔应重新计时（最近出现的排序靠它）');
   eq(L.recordSeenRoom(s, '', 'x'), false, '空 rid 不写');
+  eq(L.recordSeenRoom(s, 'a1b2c3d4e5f6', ''), false, '读不到名字（骨架期）不该刷新时间戳：落盘值没变就不写');
+  eq(L.recordSeenRoom(s, '  A1B2C3D4E5F6  ', '改名了'), false, 'rid 去空白+小写归一后同一个房间，名字没变仍跳过');
   const s2 = L.defaultStore();
-  for (let i = 0; i < L.MAX_SEEN + 20; i++) L.recordSeenRoom(s2, 'r' + i + '0000000000', 'n' + i);
-  eq(Object.keys(s2.rooms).length, L.MAX_SEEN);
+  for (let i = 0; i < L.MAX_ROOM_SEEN + 20; i++) L.recordSeenRoom(s2, 'r' + i + '0000000000', 'n' + i);
+  eq(Object.keys(s2.rooms).length, L.MAX_ROOM_SEEN);
   eq(s2.rooms['r00000000000'], undefined, '最旧的应被淘汰');
-  eq(!!s2.rooms['r' + (L.MAX_SEEN + 19) + '0000000000'], true);
+  eq(!!s2.rooms['r' + (L.MAX_ROOM_SEEN + 19) + '0000000000'], true);
 });
 t('findRidByName：忽略大小写、同名取最近出现的', () => {
   const s = L.defaultStore();
@@ -404,9 +406,22 @@ t('normalizeStore 保留房间名单与采集（老落盘没有这两个字段�
   eq(!!old.uids.abcde123456, true, '读老落盘不能弄丢人的名单');
   const s = L.normalizeStore({ rids: { a1b2c3d4e5f6: { name: '花园' } }, rooms: { a1b2c3d4e5f6: { name: '花园', ts: 7 }, '': { name: 'x' } } });
   eq(s.rids['a1b2c3d4e5f6'].name, '花园');
-  eq(typeof s.rids['a1b2c3d4e5f6'].ts, 'number', '缺 ts 的名单条目要补上（否则排序 NaN）');
+  eq(s.rids['a1b2c3d4e5f6'].ts > 0, true, '缺 ts 的名单条目要补上真值（否则排序 NaN）');
   eq(s.rooms['a1b2c3d4e5f6'].ts, 7);
   eq(s.rooms[''], undefined, '空键要丢掉');
+  // 类型错（字符串/数组）不能被 for...in 拆成 '0','1','2' 这种垃圾键
+  eq(Object.keys(L.normalizeStore({ rids: 'abc' }).rids).length, 0, 'rids 是字符串时应回落空');
+  eq(Object.keys(L.normalizeStore({ rooms: ['x', 'y'] }).rooms).length, 0, 'rooms 是数组时应回落空');
+});
+
+t('rid 归一：名单按小写存、卡片大写也命中（否则大小写不同就像"没生效"）', () => {
+  const s = L.defaultStore();
+  eq(L.normRid('  A1B2C3D4E5F6 '), 'a1b2c3d4e5f6');
+  eq(L.normRid(null), '');
+  s.rids.a1b2c3d4e5f6 = { name: '花园', ts: 1 };
+  eq(L.isRoomBlockedIn(s, 'A1B2C3D4E5F6'), true, '大写卡片要命中');
+  eq(L.isRoomBlockedIn(s, ' a1b2c3d4e5f6 '), true, '带空格也要命中');
+  eq(L.isRoomBlockedIn(s, 'b1b2c3d4e5f6'), false);
 });
 
 console.log('\n== 边界回归（分隔符错位 / 原型污染）==');
