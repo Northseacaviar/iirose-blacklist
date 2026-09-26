@@ -115,8 +115,6 @@ tools/    publish.js（发布件同步，--check 只校验）、purge-cdn.js（�
 start.bat 本地托管 8770（自定义 JS 注入调试用）
 ```
 
-过程产物（调研笔记、审查报告、复盘页、成本账、探针脚本）只留本机 `docs/`，**不入库**。
-
 ## 发布（改完代码怎么做）
 
 1. `node tools/publish.js` —— 把 `src` 同步到 `release/` 与仓库根（jsdelivr 默认地址取的是仓库根那份；漏做一次就是「测试全过、朋友拿到旧版」）
