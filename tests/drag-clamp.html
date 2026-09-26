@@ -98,7 +98,7 @@
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   // 期望的默认位置：与 src 里 defaultFabPos（窄屏分支 vw<520 用 vw-FAB-8/vh-108）同一套算法，
-  // 不在夹具里写死宽屏公式（独立审查 S1：写死会让窄视口假 FAIL）
+  // 不在夹具里写死宽屏公式（写死会让窄视口假 FAIL）
   function expectedDefault(w, h) {
     const vw = window.innerWidth, vh = window.innerHeight;
     let left = vw - 60, top = vh - 260;
@@ -184,7 +184,7 @@
     ok(newRect.left >= 0 && newRect.top >= 0 && !(newRect.left === oldRect.left && newRect.top === oldRect.top),
       '拖动确实发生了且没有越界（不是"没动"造成的假绿）', 'before ' + Math.round(oldRect.left) + ',' + Math.round(oldRect.top) + ' after ' + Math.round(newRect.left) + ',' + Math.round(newRect.top));
 
-    log('\n[7] 局部越位（只有一部分探出视口）→ 必须回默认位置，不是钳回边界（独立审查 M1：夹具原来只测完全出界，锁不住本次判据）');
+    log('\n[7] 局部越位（只有一部分探出视口）→ 必须回默认位置，不是钳回边界（夹具原来只测完全出界，锁不住本次判据）');
     fab.style.left = '-30px'; fab.style.top = '120px';       // left=-30：球右半还在视口里
     window.dispatchEvent(new Event('resize'));
     const lr = R(fab);
@@ -192,7 +192,7 @@
     ok(Math.abs(Math.round(lr.left) - dfp.left) <= 1 && Math.abs(Math.round(lr.top) - dfp.top) <= 1,
       '局部越位 → 落默认位置', '[实测 ' + Math.round(lr.left) + ',' + Math.round(lr.top) + ' 期望 ' + dfp.left + ',' + dfp.top + ']');
 
-    log('\n[8] 面板贴底后自己长高（新消息进名单）→ 应被钳回界内（独立审查 M2：长高不发 resize 事件）');
+    log('\n[8] 面板贴底后自己长高（新消息进名单）→ 应被钳回界内（长高不发 resize 事件）');
     if (panel) {
       panel.style.display = 'flex';
       panel.style.height = '200px';

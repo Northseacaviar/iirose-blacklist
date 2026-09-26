@@ -677,7 +677,7 @@ async function run() {
     ok(/存储：/.test(r.line), '自检行应写明存储方式：' + r.line);
   });
 
-  await t('W44 保留历史时：被拉黑者的历史点播卡片仍被清掉，同人的文字行保留（2026-09-25 北海实测反馈）', async () => {
+  await t('W44 保留历史时：被拉黑者的历史点播卡片仍被清掉，同人的文字行保留（真机实测反馈）', async () => {
     const A = window.__IIROSE_BLACKLIST__;
     A.setEnabled(true); A.setKeepHistory(true); A.setClearCards(true);
     const uid = 'card0000001m';
@@ -890,7 +890,7 @@ async function run() {
     eq(window.__RECV[0], like, '解除拉黑后点赞通知应恢复到达');
   });
 
-  await t('W54 判据只按名字（北海 2026-09-26 拍板）：头像完全相同但名字不同 → 不拦；公告照旧不动', async () => {
+  await t('W54 判据只按名字（口径：只按名字）：头像完全相同但名字不同 → 不拦；公告照旧不动', async () => {
     const A = window.__IIROSE_BLACKLIST__;
     A.setEnabled(true);
     const uid = 'mailbox0005ee';

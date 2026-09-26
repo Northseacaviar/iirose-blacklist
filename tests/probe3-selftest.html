@@ -22,15 +22,15 @@ window.socket = {
   try {
   for (let i = 0; i < 40 && !(window.__MAIL3__ && window.__MAIL3__.hooked); i++) await wait(200);
   const A = window.__IIROSE_BLACKLIST__;
-  A.block('5e8f28b7a7b55', 'Night cruise');
+  A.block('aaaaaaaaaaaa1', '测试甲');
   await wait(200);
 
   // 站点真实形状（7 字段）：名>头像>性别>标记>背景>时间>颜色
-  const like   = "@*Night cruise>http://r.iirose.com/i/x.png>1>'*>http://img/bg.png>1790389464>d6122a";
-  const likeBad= "@*Night cruise>http://r.iirose.com/i/x.png>0>'*>http://img/bg.png>1790389464>d6122a";
-  const pay    = "@*Night cruise>http://r.iirose.com/i/x.png>1>'$ 10>http://img/bg.png>1790389464>d6122a";
+  const like   = "@*测试甲>http://r.iirose.com/i/x.png>1>'*>http://img/bg.png>1790389464>d6122a";
+  const likeBad= "@*测试甲>http://r.iirose.com/i/x.png>0>'*>http://img/bg.png>1790389464>d6122a";
+  const pay    = "@*测试甲>http://r.iirose.com/i/x.png>1>'$ 10>http://img/bg.png>1790389464>d6122a";
   const other  = "@*路人甲>http://r.iirose.com/i/y.png>2>'*>http://img/bg.png>1790389464>ffffff";
-  const room   = '"1700000010>http://av/9.jpg>Night cruise>hi>040b02>040b02>1>>5e8f28b7a7b55>g>999';
+  const room   = '"1700000010>http://av/9.jpg>测试甲>hi>040b02>040b02>1>>aaaaaaaaaaaa1>g>999';
 
   ok(!!window.__MAIL3__ && window.__MAIL3__.hooked === 1, '探针挂上了收包（__MAIL3__.hooked=1）');
 

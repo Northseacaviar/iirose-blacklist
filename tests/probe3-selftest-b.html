@@ -20,9 +20,9 @@ window.socket = { _onmessage: function (d) { window.__RECV.push(d); }, send: fun
     ok(window.__MAIL3__.hooked === 1, '探针在插件后到的情况下仍然挂上了收包');
     const A = window.__IIROSE_BLACKLIST__;
     ok(!!A && A.hooked === true, '插件照常挂上了（探针没把它挡掉）');
-    A.block('5e8f28b7a7b55', 'Night cruise');
+    A.block('aaaaaaaaaaaa1', '测试甲');
     await wait(200);
-    const like = "@*Night cruise>http://r.iirose.com/i/x.png>1>'*>http://img/bg.png>1790389464>d6122a";
+    const like = "@*测试甲>http://r.iirose.com/i/x.png>1>'*>http://img/bg.png>1790389464>d6122a";
     window.__RECV.length = 0; window.socket._onmessage(like);
     ok(window.__RECV.length === 0, '点赞记录仍被插件丢掉（探针在外层也照常拦）');
     const fr = window.__MAIL3__.frames.filter((x) => x.p === '@');

@@ -4,12 +4,12 @@
  *   jsdelivr 对 **分支引用**（@main）的缓存是 s-maxage=43200（12 小时）。
  *   loader 请求主脚本时带的 `?t=时间戳` 只能绕开**浏览器**缓存 —— CDN 忽略查询串，
  *   照旧把它那份旧快照发回来。于是 v0.3.0/0.3.1/0.3.2 三次发版，
- *   北海的页面一直跑着 v0.2.4（实测 = tag v0.2.6 的快照，md5 完全相同），信箱通知自然"没实现"。
+ *   用户页面一直跑着 v0.2.4（实测 = tag v0.2.6 的快照，md5 完全相同），新版功能自然"没实现"。
  *   gcore 那份缓存 jsdelivr 的 purge 接口覆盖不到（providers 只报 CF + FY），只能等它过期。
  *
  * 用法：node tools/purge-cdn.js         清缓存 → 逐主机复核版本 → 有落后就退出码 1
  *       node tools/purge-cdn.js --check 只复核不清
- * 说明：走本机 Clash 代理、带 --ssl-no-revoke（本机 schannel 吊销检查常报离线，会让请求假失败）。
+ * 说明：需要代理时设 HTTPS_PROXY 环境变量；带 --ssl-no-revoke（Windows schannel 吊销检查常报离线，会让请求假失败）。
  */
 const { execFileSync } = require('child_process');
 const fs = require('fs');
@@ -19,7 +19,7 @@ const REPO = 'Northseacaviar/iirose-blacklist';
 const HOSTS = ['cdn.jsdelivr.net', 'fastly.jsdelivr.net', 'gcore.jsdelivr.net'];
 const PATHS = ['iirose-blacklist@main/iirose-blacklist.js', 'iirose-blacklist@main/loader.js',
   'iirose-blacklist/iirose-blacklist.js', 'iirose-blacklist/loader.js'];
-const PROXY = process.env.HTTPS_PROXY || 'http://127.0.0.1:7897';
+const PROXY = process.env.HTTPS_PROXY || process.env.https_proxy || '';
 const checkOnly = process.argv.indexOf('--check') >= 0;
 
 const want = (fs.readFileSync(path.join(__dirname, '..', 'src', 'iirose-blacklist.js'), 'utf8')

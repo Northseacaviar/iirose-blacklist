@@ -111,7 +111,7 @@
         confVersion: CONF_VERSION,   // 见顶部说明：用来区分"用户显式选择"与"上一版的默认值"
         debug: false,
         panel: null,          // 用户拖到的面板位置（null=自动摆放）
-        // 拉黑时遍历聊天记录，清掉被拉黑者的历史（点播卡片 + 消息）——2026-09-25 北海重新界定需求后的默认行为
+        // 拉黑时遍历聊天记录，清掉被拉黑者的历史（点播卡片 + 消息）—— 默认行为（keepHistory=false）
         keepHistory: false,   // false=拉黑瞬间清掉他的历史消息（默认）；true=文字历史只留不删，只拦新消息
         // 点播卡片（媒体消息）单独一档：卡片不算"聊天记录"，即使 keepHistory 开着也照清
         clearCards: true,     // true=被拉黑者的历史点播卡片照清；false=卡片也跟着保留
@@ -136,7 +136,7 @@
     }
     for (const k in s.counters) if (typeof raw.counters?.[k] === 'number') s.counters[k] = raw.counters[k];
     if (raw.conf && typeof raw.conf === 'object') {
-      // 配置迁移（2026-09-25 真机反馈"卡片清了、文字还在"）：
+      // 配置迁移（真机反馈"卡片清了、文字还在"）：
       // 老落盘里没有 confVersion —— 那时期的 keepHistory=true 是**上一版的默认值**，不是用户选择。
       // 直接沿用会把新默认（拉黑即清历史）顶掉，症状恰好是"卡片清掉、文字留着"。所以没有版本号就迁到新默认并回写。
       const legacy = typeof raw.conf.confVersion !== 'number';
@@ -293,10 +293,10 @@
    *   3 字段 = 房间公告（站级通知，不带人名）——【一律不动】
    *   7 字段 = 用户名>头像>性别>标记(+附言)>背景>时间>颜色，标记：
    *            '^ 关注 / '*' 点赞 / 'h 点踩 / '$ 转账（打赏）
-   * 关键限制（2026-09-26 真机探针 blk-mail2-* 实测）：信箱条目里【没有 uid】——
+   * 关键限制（真机抓包实测）：信箱条目里【没有 uid】——
    *   帧只有 用户名+头像链接，界面卡的 onclick 也是 getProfile(['名','色','头像','性别',null])，uid 位是 null。
-   *   所以只能按 名字/头像 认人；北海 2026-09-26 拍板接受同名误伤，不做兜底开关。
-   * 丢帧范围（北海 2026-09-26 拍板）：只丢「形状完全认得出、且命中名单」的记录；
+   *   所以只能按 名字/头像 认人；接受同名误伤，不做兜底开关。
+   * 丢帧范围：只丢「形状完全认得出、且命中名单」的记录；
    *   转账（'$'）永远不丢 —— 钱优先（丢帧会不会影响入账未经验证，通知只在界面层隐藏）。
    *   认不出的记录一律原样保留：零影响优先。
    * ------------------------------------------------------------------ */
@@ -304,8 +304,8 @@
 
   // 解析一条信箱记录；null = 形状不认识（残片/未知类型），调用方必须原样放行
   //
-  // 2026-09-26 真机（北海截图）：转账真帧长这样 ——
-  //   @*Night cruise><头像 URL>'$1>>1790402429>ffffef
+  // 真机抓包：转账帧长这样（6 格、标记在第 3 格，与官方样本格式不同）——
+  //   @*<用户名><头像 URL>'$1>><uid>ffffef
   // 标记位不在第 4 格（官方样本才在 p[3]），格子数也和样本不一样 —— 原来那套"第 3 格必须 1~3 /
   // 第 6 格 9~11 位时间戳 / 第 7 格 6 位颜色"的下标假设直接把真帧判成"形状不认识"继而放行（闸就不开）。
   // 改成按特征找，不认死下标：
@@ -337,7 +337,7 @@
   }
 
   // 命中黑名单？**只按名字**（trim + 小写完全相等）。
-  // 北海 2026-09-26 拍板：不用头像判据 —— 站点预置卡通头像（如 cartoon/600264）可能多用户共用，
+  // 不用头像判据 —— 站点预置卡通头像（如 cartoon/600264）可能多用户共用，
   // 按头像认人会把无关路人一起拦掉（误伤）；宁可漏拦，不误伤。
   function mailHit(store, name) {
     if (!store || !store.uids) return null;                 // 手调 _diag 时传 null 不该抛
@@ -390,14 +390,14 @@
   }
 
   /* ------------------------------------------------------------------
-   * 信箱通知的"静默闸"（v0.3.4；北海 2026-09-26 要求："被屏蔽的人发信箱消息，不能弹信箱"）
+   * 信箱通知的"静默闸"（v0.3.4）：被屏蔽的人发信箱消息时不弹信箱 ——
    *
    * 站点源码（逆向文档 docs/reference/src/messages.js，本地快照在 docs/技术调研.md 同源）：
    *   '@*' 帧（L13620）→ Init.fullPanel(9) → Objs.leaveMsgHolder.function.get(记录串)
    *     · 逐条渲染 .cardTag，并 push 一条桌面通知（Constant.NOTIFY.MAIL，L22445 附近）
    *     · panelAnimate(40, 1)                 ← 这就是"信箱弹出来了"
    *     · Utils.Resource.notiSound("mail")    ← 提示音
-   * 转账（'$'）按北海口径**不过滤**（钱优先），所以站点照旧会弹 —— 于是界面层的三件事在这里统一吞掉：
+   * 转账（'$'）**不过滤**（钱优先），所以站点照旧会弹 —— 于是界面层的三件事在这里统一吞掉：
    *   闸 = 这一帧里被屏蔽者的记录还活着（转账）、且没有别人的记录；
    *   闸只在帧到达后的短窗口内有效，且"吞弹面板"每窗最多一次（用户自己那一下点开不会被连吞）。
    * 钱的账不受影响：帧照旧到站点，Variable.coin 的加法、localStorage 的落盘、卡片渲染全在站点自己手里，
@@ -408,7 +408,7 @@
   let mailSilentUntil = 0;
   let mailPopSwallowed = false;
 
-  // 真机诊断（v0.3.5；北海 2026-09-26 真机："版本 0.3.4 了，转账还是弹信箱"）：
+  // 真机诊断（v0.3.5；现场现象："版本升到 0.3.4 了，转账还是弹信箱"）：
   // 这种问题靠猜没用，把帧原文 + 逐条判定 + 闸的动作摆到面板里（调试日志开时才显示）。
   const mailDiag = {
     at: 0, raw: '', recs: [], act: '',
@@ -626,7 +626,7 @@
     if (kind === 'room') store.counters.room++;
     else if (kind === 'priv') store.counters.priv++;
     else if (kind === 'danmaku') store.counters.danmaku++;
-    else if (kind === 'mail') store.counters.mail = (store.counters.mail || 0) + 1;   // 面板不显示（北海 2026-09-26：不加统计行），调试日志里能看
+    else if (kind === 'mail') store.counters.mail = (store.counters.mail || 0) + 1;   // 面板不显示（不加统计行），调试日志里能看
     saveStore();
     if (store.conf.debug) log('已屏蔽', kind, uid, '累计', JSON.stringify(store.counters));
     if (ui && ui.refreshStats) ui.refreshStats();
@@ -727,7 +727,7 @@
     if (!node || node.nodeType !== 1) return null;
     const ds = node.dataset || {};
     // 优先信站点自己写的 data-uid（头像上带的），data-id 只作兜底：
-    // data-id 是 "uid_消息id" 拼串，uid 里含下划线时会被切出假 uid（审查 2026-09-25 ③-5 实测）
+    // data-id 是 "uid_消息id" 拼串，uid 里含下划线时会被切出假 uid（实测）
     if (looksLikeUid(ds.uid)) return ds.uid;
     const av = node.querySelector && node.querySelector('[data-uid]');
     if (av && av.dataset && looksLikeUid(av.dataset.uid)) return av.dataset.uid;
@@ -762,7 +762,7 @@
 
   /* ------------------------------------------------------------------
    * 信箱卡片：侧栏「信箱」面板 = #leaveMsgHolder，条目 = .cardTag
-   * 真机实测结构（2026-09-26 探针 blk-mail2-*）：
+   * 真机实测结构（抓包）：
    *   <div class="cardTag">
    *     <div class="cardTagBg mdi-image-outline"><div class="cardTagNew">（未读小红点）
    *     <div class="cardTagI">
@@ -836,7 +836,7 @@
     //   ① 非增量（启动/定时/拉黑后的全扫）→ 页面上既有的这批就是历史；
     //   ② 增量，但新增的子树**带着面板本身**（审查 D6：站点把面板整块插入，里面本就带着历史卡片）。
     // 反面：面板早就在 DOM 里、只是往里 append 了一张卡片 = 站点新推来的通知 → 必须按"新"处理。
-    // （2026-09-26 北海真机反馈：面板空着时，被拉黑者的第一条通知被当历史留了下来 —— 就是漏在这个反面。）
+    // （真机反馈：面板空着时，被拉黑者的第一条通知被当历史留了下来 —— 就是漏在这个反面。）
     const panelBuilt = incremental && bringsPanelItself(scope);
     const historyBatch = !incremental || panelBuilt;
     if (rows.length > 0) mailPanelSeen = true;
@@ -898,7 +898,7 @@
       const hit = !!(uid && store.enabled && isBlocked(uid));
       diag.hits.push({ uid: uid, blocked: hit, hasParent: !!row.parentNode, sameAsRoot: row === root });
       if (hit) {
-        // 点播卡片不算"聊天记录"：保留历史时也照清（2026-09-25 北海要求），
+        // 点播卡片不算"聊天记录"：保留历史时也照清，
         // 由「清除历史点播卡片」开关单独控制（conf.clearCards）
         const card = isCardRow(row);
         if (card) diag.card = true;
@@ -1221,13 +1221,13 @@
     // 用 setPointerCapture 保证手指滑出元素后仍持续收到 move；用 touch-action:none 防止页面跟着滚。
     let sx = 0, sy = 0, ox = 0, oy = 0, moved = 0, dragging = false;
     let gid = 0, ended = -1, usingPointer = false;             // 一个手势只结算一次（指针 + 鼠标两套事件会各触发一遍）
-    // 边界钳制（v0.3.8，北海口径："别再丢出去看不见，要能操作，越位就拉回"）：
+    // 边界钳制（v0.3.8）：拖不出页面 —— 越位就拉回默认位置，保证还能操作：
     // 拖到页面边上就停住 —— 元素边界 = 所在文档的视口边界，不留溢出行外（贴边的 4px 内缩沿用
     // clampToViewport，与初始摆放/自愈同一套口径，否则会出现"拖着贴着边、一 resize 又弹开 4px"）。
     // 坐标系：钳制在视口坐标（getBoundingClientRect）里做，写回用 style 坐标（offsetLeft/Top）；
     // 两者正常相等，但 offsetParent 不在原点时会有固定差值，不补掉的话按下的第一帧会跳一下。
     let ew = 0, eh = 0, vdx = 0, vdy = 0;
-    // 拖动阈值只留一个（独立审查 S6 实测：原来 move 用 >3、end 用 <5，位移 4px 时既挪球又开面板）
+    // 拖动阈值只留一个（实测：原来 move 用 >3、end 用 <5，位移 4px 时既挪球又开面板）
     const DRAG_MIN = 5;
     try { handle.style.touchAction = 'none'; } catch (_) { }
     const start = (e) => {
@@ -1250,7 +1250,7 @@
       const dx = e.clientX - sx, dy = e.clientY - sy;
       moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
       if (moved >= DRAG_MIN) {
-        // 撞边即停（不重设基准 —— 北海选的方案 A：往外拖多远，往回拖就要走完那段空程）
+        // 撞边即停（不重设基准：往外拖多远，往回拖就要走完那段空程）
         // 尺寸每帧现量：面板高度会随内容变（新消息进名单、诊断行出现），用按下时的旧尺寸钳会让底部探出视口
         const r = node.getBoundingClientRect();
         const p = clampToViewport(ox + dx + vdx, oy + dy + vdy, r.width || ew, r.height || eh);
@@ -1262,7 +1262,7 @@
       if (!dragging || ended === gid) return;                // 同一手势的 mouseup/pointerup 只认第一次
       ended = gid; dragging = false;
       if (moved < DRAG_MIN) { if (onClick) onClick(); return; }
-      // 落盘前按当前尺寸再钳一次（独立审查 M2）：move 里的钳制管不到"结束时尺寸才变大"这条路径，
+      // 落盘前按当前尺寸再钳一次：move 里的钳制管不到"结束时尺寸才变大"这条路径，
       // 存进 store 的位置必须已经是界内的，否则下次打开面板会先摆到界外再被拉回来（看得见的跳）
       const r = node.getBoundingClientRect();
       const p = clampToViewport(r.left, r.top, r.width || ew, r.height || eh);
@@ -1359,7 +1359,7 @@
     });
     panel.appendChild(keepToggle);
 
-    // 点播卡片（2026-09-25 北海实测反馈：拉黑后对方的历史点播卡片还挂在聊天里）
+    // 点播卡片（真机实测反馈：拉黑后对方的历史点播卡片还挂在聊天里）
     // 卡片是媒体消息，不算聊天记录 —— 「保留历史消息」开着时也照样清
     const cardToggle = toggleRow('clearCards', '清除历史点播卡片', store.conf.clearCards !== false, (on) => {
       store.conf.clearCards = on; saveStore();
@@ -1419,7 +1419,7 @@
       cursor: 'pointer', userSelect: 'text', WebkitUserSelect: 'text',
     });
     panel.appendChild(mailDiagBox);
-    // v0.3.11（北海 2026-09-26：信箱诊断平时用不到，一起隐藏）：面板里不再显示这块诊断文本，
+    // v0.3.11（信箱诊断平时用不到，一起隐藏）：面板里不再显示这块诊断文本，
     // 连着开着调试日志也不显示。内容随时可读，走控制台：
     //   __IIROSE_BLACKLIST__._diag.mailCards() / .rawStats()   看逐条判定与统计
     //   __IIROSE_BLACKLIST__.openDiag()                         开 760px 大字窗口（可复制/截图）
@@ -1485,7 +1485,7 @@
       box.appendChild(head); box.appendChild(pre);
       // 站点的手势/面板拖拽会吃掉选择：这些事件停在这里别往外冒。
       // 必须只在【冒泡阶段】停 —— 捕获阶段 stopPropagation 会连自己的后代一起掐死，
-      // 表现就是窗口里的「关闭 / 复制全文 / 刷新」全点不动、诊断窗口关不掉（2026-09-26 北海真机）。
+      // 表现就是窗口里的「关闭 / 复制全文 / 刷新」全点不动、诊断窗口关不掉（真机复现）。
       // 站点若在 document 捕获阶段处理，本拦截本来就来不及（document 捕获比这里更早），冒泡拦截才是有效的那道。
       ['pointerdown', 'mousedown', 'click', 'dblclick', 'touchstart', 'mouseup'].forEach((ev) => {
         box.addEventListener(ev, (e) => { e.stopPropagation(); });
@@ -1512,7 +1512,7 @@
         () => setStatus('已复制 ' + lines.length + ' 条到剪贴板', '#68b26d'),
         () => setStatus('复制失败（浏览器不给权限）：名单已打到控制台，可手动复制', '#ec4141'));
     });
-    // 「诊断」入口默认隐藏（北海 2026-09-26：平时用不到）。代码保留 —— 排查时改回 display 即可；
+    // 「诊断」入口默认隐藏（平时用不到）。代码保留 —— 排查时改回 display 即可；
     // 要彻底删掉的话说一声。面板内的诊断文本块（调试日志开着时出现）仍然点得开大字窗口。
     const diagBtn = el('button', {
       background: '#2a2b33', color: '#bbb', border: '1px solid #444', borderRadius: '5px',
@@ -1626,7 +1626,7 @@
       try {
         const r = fab.getBoundingClientRect();
         const vw = window.innerWidth || 0, vh = window.innerHeight || 0;
-        // 越位判定（v0.3.8，北海口径："越位就暴力拉回默认位置"）：只要有任一边探出视口，直接回默认右下角，
+        // 越位判定（v0.3.8）：只要有任一边探出视口，直接回默认右下角，
         // 不做"钳到最近边界"的温柔处理。容忍 1px —— 坐标都四舍五入过，恰好贴边时会有亚像素误差。
         const lost = !r.width || !r.height ||
                      r.left < -1 || r.top < -1 || r.right > vw + 1 || r.bottom > vh + 1;

@@ -160,7 +160,7 @@ t('官方点赞样本：按名字命中时丢弃；未拉黑时字节级透传',
   eq(L.filterFrame(F.docMailLike, s, null).data, null);
   eq(L.filterFrame(F.docMailLike, storeMail([]), null).data, F.docMailLike);
 });
-t('信箱·转账（打赏）永不丢帧 —— 钱优先（北海 2026-09-26 拍板）', () => {
+t('信箱·转账（打赏）永不丢帧 —— 钱优先（口径：转账优先）', () => {
   const s = storeMail([{ uid: F.ROOM_UID, name: F.MAIL_NAME }]);
   const f = F.mailPayment(F.MAIL_NAME, 'http://x/a.jpg', 5);
   const r = L.filterFrame(f, s, null);
@@ -215,7 +215,7 @@ t('mailRecordInfo：3 字段=公告（不可拦）、7 字段认标记、其余�
   eq(L.mailRecordInfo(['只有两个', '字段']), null);
   eq(L.mailRecordInfo(F.mailRec('甲', 'a.jpg', 'Z').split('>')), null);
 });
-t('信箱·房间公告文本里含 > 被切成 7 段时，不得被误拦（独立审查 B4 实测的回归）', () => {
+t('信箱·房间公告文本里含 > 被切成 7 段时，不得被误拦（实测的回归）', () => {
   // 公告是 3 字段，但文本里含 4 个 '>' 时整体会被切成 7 段，[3] 恰好是 "'*" —— 旧规则会把它当点赞记录，
   // 而"名字"位正好是公告首段。零误伤红线要求：站级公告一律不动。
   const s = storeMail([{ uid: F.ROOM_UID, name: '公告' }]);
@@ -239,11 +239,11 @@ t('信箱·形状守卫（按特征找，不认死下标）：时间戳/颜色�
   eq(bad(6, 'd28ad'), null, '颜色 5 位');
   eq(bad(2, '9') && bad(2, '9').type, 'like', '性别格不再是判据（真机转账帧压根没有这一格）');
   eq(bad(1, 'a.jpg') && bad(1, 'a.jpg').type, 'like', '其它格不该被牵连');
-  // 真机帧（北海 2026-09-26 截图）：标记不在第 4 格、共 6 格 —— 必须认得出，且金额大的转账不丢
-  const real = "@*Night cruise>https://xc.null.red:8043/XCimg/img/save/2024/08/29/blob-1596976874#.jpg#e0>'$1>>1790402429>ffffef";
+  // 真机帧（账号信息已脱敏，格子形状原样）：标记不在第 4 格、共 6 格 —— 必须认得出，且金额大的转账不丢
+  const real = "@*测试甲>https://example.com/av.jpg>'$1>>1000000001>ffffef";
   const info = L.mailRecordInfo(real.slice(2).split('>'));
   eq(info && info.type, 'payment', '真机转账帧没认出来（闸就不会开 → 信箱照弹）');
-  eq(info && info.name, 'Night cruise', '名字格取错了');
+  eq(info && info.name, '测试甲', '名字格取错了');
   eq(info && info.blockable, false, '转账必须不可丢（钱优先）');
   // 5 格 / 9 格的边界：标记位在 1~5 格内都认；超过 9 格一律当不认识
   eq(L.mailRecordInfo("甲>a>'*>1762613079>d28ad2".split('>')).type, 'like', '5 格变体（标记在第 3 格）');

@@ -111,7 +111,7 @@ const rowOf = (id) => document.getElementById(id);
   });
 
   // ---- E4：面板早就在 DOM 里、只是空着 —— 被拉黑者的**第一条**通知（面板里新 append 的卡片）
-  //        必须隐掉（北海 2026-09-26 真机反馈：保留历史开着时，这条被当"面板首批历史"留了下来）----
+  //        必须隐掉（真机反馈：保留历史开着时，这条被当"面板首批历史"留了下来）----
   await t('E4 面板早存在且空：保留历史开着 → 新推来的第一张被拉黑者卡片仍要隐', async () => {
     A.setKeepHistory(true);
     const holder = document.getElementById('keepAliveHolder');
@@ -127,7 +127,7 @@ const rowOf = (id) => document.getElementById(id);
     card.innerHTML = cardHtml(NAME, 'https://s.iirose.com/images/icon/cartoon/900001.jpg');
     holder.querySelector('.contentItemContent').appendChild(card);   // 站点把新通知 append 进已有面板
     await sleep(500);
-    eq(card.style.display, 'none', '面板空着时被拉黑者的第一条通知没隐 —— 会被当成"面板首批历史"（北海真机反馈的正是这条）');
+    eq(card.style.display, 'none', '面板空着时被拉黑者的第一条通知没隐 —— 会被当成"面板首批历史"（真机反馈的正是这条）');
     holder.parentNode.removeChild(holder);
     A.unblock(BLOCK);
     await sleep(200);
