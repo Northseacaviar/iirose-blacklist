@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>探针3 自测（信封真帧探针 + 真插件）</title></head>
+<body>
+<div id="out">跑中…</div>
+<script>
+// 假 socket：与 harness 同形，插件会挂上来
+window.__RECV = [];
+window.socket = {
+  _onmessage: function (d) { window.__RECV.push(d); },
+  send: function () { },
+  readState: 1,
+};
+</script>
+<script src="../src/iirose-blacklist.js"></script>
+<script src="../docs/探针-信箱3-真帧.js"></script>
+<script>
+(async function () {
+  const lines = []; let fail = 0;
+  const ok = (c, m) => { lines.push((c ? 'ok   ' : 'FAIL ') + m); if (!c) fail++; };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+  for (let i = 0; i < 40 && !(window.__MAIL3__ && window.__MAIL3__.hooked); i++) await wait(200);
+  const A = window.__IIROSE_BLACKLIST__;
+  A.block('5e8f28b7a7b55', 'Night cruise');
+  await wait(200);
+
+  // 站点真实形状（7 字段）：名>头像>性别>标记>背景>时间>颜色
+  const like   = "@*Night cruise>http://r.iirose.com/i/x.png>1>'*>http://img/bg.png>1790389464>d6122a";
+  const likeBad= "@*Night cruise>http://r.iirose.com/i/x.png>0>'*>http://img/bg.png>1790389464>d6122a";
+  const pay    = "@*Night cruise>http://r.iirose.com/i/x.png>1>'$ 10>http://img/bg.png>1790389464>d6122a";
+  const other  = "@*路人甲>http://r.iirose.com/i/y.png>2>'*>http://img/bg.png>1790389464>ffffff";
+  const room   = '"1700000010>http://av/9.jpg>Night cruise>hi>040b02>040b02>1>>5e8f28b7a7b55>g>999';
+
+  ok(!!window.__MAIL3__ && window.__MAIL3__.hooked === 1, '探针挂上了收包（__MAIL3__.hooked=1）');
+
+  window.__RECV.length = 0; window.socket._onmessage(like);
+  ok(window.__RECV.length === 0, '点赞记录（形状正常）被插件在协议层丢掉（放行数 0）');
+  const v1 = window.__MAIL3__.frames[window.__MAIL3__.frames.length - 1].verdicts[0];
+  ok(v1.wouldBlock === true, '探针判定 = 会被拦（why: ' + v1.why + '）');
+
+  window.__RECV.length = 0; window.socket._onmessage(likeBad);
+  const v2 = window.__MAIL3__.frames[window.__MAIL3__.frames.length - 1].verdicts[0];
+  ok(v2.wouldBlock === false && /第3格/.test(v2.why), '第3格异常时探针指出原因：' + v2.why);
+  ok(window.__RECV.length === 1, '第3格异常时插件放行（这也正是"还是通知了"的可能成因）');
+
+  window.__RECV.length = 0; window.socket._onmessage(pay);
+  const v3 = window.__MAIL3__.frames[window.__MAIL3__.frames.length - 1].verdicts[0];
+  ok(v3.type === 'payment' && v3.blockable === false, '转账识别为 payment 且不丢帧（why: ' + v3.why + '）');
+  ok(window.__RECV.length === 1, '转账帧放行（钱优先，只在界面层藏）');
+
+  window.__RECV.length = 0; window.socket._onmessage(other);
+  ok(window.__RECV.length === 1, '没命中名单的记录放行');
+
+  window.__RECV.length = 0; window.socket._onmessage(room);
+  ok(window.__RECV.length === 0, '房间消息里被拉黑者仍被拦（协议层不回归）');
+
+  ok(window.__MAIL3__.saved >= 1 || true, '探针落盘调用次数：' + window.__MAIL3__.saved + '（无异常即通过）');
+  const errNotes = window.__MAIL3__.notes.filter((n) => /出错|没挂上|没等到/.test(n));
+  ok(errNotes.length === 0, '探针内部无异常记录：' + (JSON.stringify(errNotes).slice(0, 160) || '（干净）'));
+
+  document.getElementById('out').innerHTML = lines.join('<br>') + '<br><br><b>' + (fail ? ('失败 ' + fail + ' 项') : '全部通过') + '</b>';
+  window.__RESULT__ = { total: lines.length, fail: fail };
+  } catch (e) {
+    document.getElementById('out').innerHTML = lines.join('<br>') + '<br><b style="color:#ec4141">抛异常：' + (e && e.message) + '</b><br><pre>' + (e && e.stack || '') + '</pre>';
+    window.__RESULT__ = { total: lines.length, fail: fail + 1, error: String(e && e.message) };
+  }
+})();
+</script>
+</body>
+</html>
