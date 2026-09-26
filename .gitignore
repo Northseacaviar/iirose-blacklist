@@ -2,3 +2,5 @@ node_modules/
 *.log
 # 过程产物只留本机，不入库（调研笔记/审查报告/复盘页/成本账/探针脚本）
 docs/
+# 成本核算脚本只服务本机账本，不入库
+tools/token-report.py

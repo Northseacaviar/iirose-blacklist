@@ -74,7 +74,7 @@ tests/    子测试：Node 单测（提取 #region CORE / #region STORAGE）+ �
           + official-mode.html（官方插件形态：假 Ext.Service，验合规与存储）
           + loader-test.html（loader 本地路径 6 项）+ loader-cdn.html（loader 走 CDN 实链 = 朋友路径）
 release/  发布件（推 GitHub / jsdelivr 用）
-tools/    publish.js（发布件同步，--check 只校验）、
+tools/    publish.js（发布件同步，--check 只校验）、purge-cdn.js（刷 jsdelivr 缓存并逐主机复核版本）
 start.bat 本地托管（自定义 JS 注入调试用）
 ```
 
@@ -87,7 +87,7 @@ start.bat 本地托管（自定义 JS 注入调试用）
 3. `git add -A && git commit && git push`
 4. **打 tag**（必须先打 —— 无 ref 的默认地址解析的是「最新 tag 的快照」，不打 tag 默认地址就不动、新文件还会 404）：`git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`
 5. 刷 jsdelivr 缓存：`node tools/purge-cdn.js`（清 `@main`／无 ref 缓存并逐主机复核版本，落后即退出码 1；**只覆盖 CF + FY 两家主机**）。手刷单条时**必须带本地代理**，否则直连 purge 会静默失败（响应体是空的，地址悄悄停在上一版）：
-   `curl -x http://127.0.0.1:7897 "https://purge.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/loader.js"`
+   `curl -x http://<你的代理地址:端口> "https://purge.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/loader.js"`
 6. 复核三条（**不能只看 curl 没报错**）：① `curl -sI <默认地址> | grep -i x-jsd-version` 看无 ref 地址解析到哪个版本（打完 tag 有分钟级延迟）；② 默认地址与 `@vX.Y.Z` 地址的 md5、`VERSION` 常量一致；③ `node tools/publish.js --check` 通过
 
 ## 官方插件规范对齐
@@ -191,24 +191,13 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/mobile-probe.js
 
 ## 真机待验证项（README 随代码更新）
 
-- **信箱真机取证：已完成** —— 真机抓到转账帧 `@*Night cruise><头像URL>'$1>>1790402429>ffffef`，证实**格子数与标记位置都跟官方样本不同**（样本 7 格、标记在 `p[3]`；真帧 6 格、标记在第 3 格），所以解析改成按特征找（v0.3.7）。
+- **信箱真机取证：已完成** —— 抓到的转账帧 `@*<用户名><头像URL>'$1>><uid>ffffef`（账号信息已脱敏），证实**格子数与标记位置都跟官方样本不同**（样本 7 格、标记在 `p[3]`；真帧 6 格、标记在第 3 格），所以解析改成按特征找（v0.3.7）。
 - **A3 的私聊历史**：实时私聊帧已确认可丢；若站点在打开私聊窗口时另用 HTTP/快照补历史消息，需要另补清扫路径。探针：真机 console 执行 `__IIROSE_BLACKLIST__.dumpDom()` 看 `ipNodes` / `msgs` 的实际结构。
 - **`[ip]` 选择器覆盖面**：若它同时也出现在房间在线成员列表上，则「不隐藏成员列表头像」这句与事实不符（会一起隐藏）。探针：`dumpDom().ipNodes[].html` 看这些节点的实际归属。
 - **下行帧是否已转义分隔符**：面板勾「调试日志」后观察「可疑帧」计数是否增长；配合 `rawStats()` 看帧前缀分布。
 - **与 iiroseForge 共存（A8）**：装 forge 后确认 `__IIROSE_BLACKLIST__.hooked === true`、`rawStats()` 持续增长、切房/重连后仍过滤。
 - **联调 W22 偶发失败**（「收包过滤被站点重建后会自己挂回来」）：单次运行红过一次、重跑不复现。已定位不是插件问题 —— 基线源码 + 新测试页、新源码 + 基线测试页都全绿，失败时同用例的前置断言（`hooked` 由 false 变 true）是通过的；更像长跑测试页的时序抖动（该用例 `sleep 6000ms` 去等 5 秒自检周期，本就卡在边界）。**下一步**：把固定等待改成轮询 `hooked`。
 - **探针页里「拉黑后名单变空」之谜**（只在自搭的 http 探针页复现；真机与 `tests/harness.html` 都没这现象）：`A.block(uid, 名字)` 之后立刻读 `isBlocked(uid) === true`、`dumpDom().blacklist` 含该 uid；同一段代码 `await sleep(400)` 之后再读 `isBlocked` 变 `false`、名单为空。源码里只有 `unblock()` 删名单、`loadStore()` 只在 `init()` 里调一次，两条路径都不该落在这个时间窗里。倾向判断：探针页自身的问题（假 socket 时序 / 多标签页同源 localStorage 串扰，二选一），**未定位**。真机若出现「拉黑后过一会儿又不生效」，回来查这条。
-
-## 成本
-
-
-
-<!-- COST:BEGIN 由 tools/token-report.py --readme 生成，别手改 -->
-- 截至 2026-09-26 16:16（北京时间）：估算花费 **$2.1755**（≈15 元人民币）· 消息 1,478 · 工具调用 755
-- 结构：主开发会话 $1.81 ／ 独立 独立审查 $0.26 ／ 部分相关折算 $0.10（明细见本机 `docs/成本账.md`，未入库）
-- 口径：`estimated_cost_usd` 是**估算不是账单**；`reasoning_tokens` 通常已含在输出口径里；缓存读占 ~98%，所以「总 token 近亿」不等于贵。
-- 复现：`python tools/token-report.py`（屏幕）· `--doc docs/成本账.md`（重写成本账）· `--readme README.md`（刷新本段）
-<!-- COST:END -->
 
 ## 版本
 
@@ -224,7 +213,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/mobile-probe.js
 | `v0.2.5` | 插件 v0.2.2：老配置迁移（`confVersion`），修「卡片清了、文字还在」 |
 | `v0.2.6` | 插件 v0.2.4：拆掉右键/长按拉黑菜单，拉黑只走面板 |
 | `v0.3.0` | 插件 v0.3.0：屏蔽信箱通知（点赞/关注/点踩协议层丢帧，转账只隐卡片） |
-| `v0.3.1` | 插件 v0.3.1：独立审查提的 4 条小问题全修（`mail` 计数落盘、空值 guard、扩展名白名单等） |
+| `v0.3.1` | 插件 v0.3.1：修 4 条小问题（`mail` 计数落盘、空值 guard、扩展名白名单等） |
 | `v0.3.2` | 插件 v0.3.2：判据改为只按名字，头像判据（`avatarKey()`）整块移除 |
 | `v0.3.3` | 插件 v0.3.3：修「面板空着时第一条通知不隐」（改看新增子树是否带面板本体）+ 发版流程补 `tools/purge-cdn.js` |
 | `v0.3.4` | loader v2.0：并行取回候选地址、先比版本再注入（不再被 `@main` 的 12 小时缓存坑）；插件本体无改动 |
@@ -232,7 +221,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist/mobile-probe.js
 | `v0.3.6` | 插件 v0.3.5：面板内置「信箱诊断」 |
 | `v0.3.7` | 插件 v0.3.6：诊断改 760px 大字窗口（可滚动、可选中、可复制全文） |
 | `v0.3.12` | 插件 v0.3.11：诊断的界面入口全部隐藏（底部按钮 + 面板内诊断文本块），改用控制台 `__IIROSE_BLACKLIST__.openDiag()` 开大字窗口；调试日志开着也不再往面板里塞诊断文本 |
-| `v0.3.11` | 插件 v0.3.10：诊断大字窗口「关不掉」修复 —— 原来在**捕获阶段**对 pointerdown/click 调 stopPropagation，会把窗口内的「关闭/复制全文/刷新」一起掐死（Northseacaviar真机）；改成冒泡阶段拦。面板底部「诊断」入口默认隐藏 |
-| `v0.3.10` | 插件 v0.3.9：独立审查（M1/M2/S5/S6/S7）修正 —— 拖动/点击阈值统一（原来位移 4px 时既挪球又开面板）、尺寸每帧现量 + 落盘前再钳（面板底部不再探出）、面板自己长高靠 ResizeObserver 回到界内、视口压矮时重算面板高度上限 |
+| `v0.3.11` | 插件 v0.3.10：诊断大字窗口「关不掉」修复 —— 原来在**捕获阶段**对 pointerdown/click 调 stopPropagation，会把窗口内的「关闭/复制全文/刷新」一起掐死（真机复现）；改成冒泡阶段拦。面板底部「诊断」入口默认隐藏 |
+| `v0.3.10` | 插件 v0.3.9：修正 5 处边界问题 —— 拖动/点击阈值统一（原来位移 4px 时既挪球又开面板）、尺寸每帧现量 + 落盘前再钳（面板底部不再探出）、面板自己长高靠 ResizeObserver 回到界内、视口压矮时重算面板高度上限 |
 | `v0.3.9` | 插件 v0.3.8：**悬浮窗拖不出页面** —— 拖动实时钳到视口边界（撞边即停、不重设基准），松手记住的是钳过的位置；越位（转屏/键盘弹出把元素挤出视口）时球直接拉回默认右下角 |
 | `v0.3.8` | 插件 v0.3.7：形状守卫改成**按特征找、不认死下标** —— 真机转账帧只有 6 格、标记不在第 4 格，原先按死下标会把它判成「形状不认识」而放行（信箱照弹） |
