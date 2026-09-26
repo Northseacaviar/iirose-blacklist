@@ -28,24 +28,26 @@
   const S = window.__IIROSE_BLACKLIST_LOADER__ || {};
 
   ok(!!A, 'CDN 上的 loader 成功把插件拉起来（朋友路径）');
-  ok(!!S.self && /loader\.js/.test(S.self), 'loader 认出了自己的地址：' + S.self);
-  ok(S.mode === 'probe', '走了 v2 的「先比版本再注入」路径（mode=' + S.mode + '）');
-
-  // 探测明细：每个候选各读到什么版本
-  const probes = (S.probes || []).filter((p) => p.ver);
-  ok(probes.length >= 2, '探测读到了 ' + probes.length + ' 份候选的版本号（@main / 无 ref / tag，至少两类）');
-  probes.forEach((p) => lines.push('<span class="dim">     v' + p.ver + '  ← ' + p.url + '</span>'));
-
-  // 选中的必须是探测里版本最高的那一份 —— 这就是 v2 修掉的那个 bug
-  const best = probes.slice().sort((a, b) => pv(b.ver) - pv(a.ver))[0];
-  const chosenProbe = probes.filter((p) => p.url === S.chosen)[0];
-  if (best && chosenProbe) {
-    ok(pv(chosenProbe.ver) === pv(best.ver),
-      '选中的是探测到的最高版本：v' + chosenProbe.ver + '（探测里最高 v' + best.ver + '）');
+  // S.self 是 v2 loader 才有的字段；旧 loader 不写，所以这一条也只算报告；下面这些细节也只看 v2
+  // CDN 上的 loader 自己是不是 v2：v2 才带 mode/probes。分支地址的 loader 有最多 12 小时窗口还会给旧的，
+  // 所以「拿到了旧 loader」只报告、不算失败；v2 逻辑本身由 tests/loader-stub.html（16 项，桩造新旧组合）保证。
+  const isV2 = !!S.mode;
+  let best = null;
+  if (S.self) lines.push('<span class="dim">     loader 自己：' + S.self + '</span>');
+  lines.push('<span class="dim">     CDN 上的 loader：' + (S.mode ? ('v2.0（mode=' + S.mode + '）') : '旧版（无 mode 字段，12 小时窗口内属正常）') + '</span>');
+  if (!isV2) {
+    lines.push('<span class="dim">     → 跳过 v2 选版断言；要立刻拿 v2 loader，把地址钉到本次 tag：…@v0.3.4/loader.js</span>');
   } else {
-    ok(!!S.chosen, '选了地址（探测明细不完整）：' + S.chosen);
+    const probes = (S.probes || []).filter((x) => x.ver);
+    ok(probes.length >= 2, '探测读到了 ' + probes.length + ' 份候选的版本号（@main / 无 ref / tag 至少两类）');
+    probes.forEach((x) => lines.push('<span class="dim">     v' + x.ver + '  ← ' + x.url.split('/gh/')[1] + '</span>'));
+    best = probes.slice().sort((a, b) => pv(b.ver) - pv(a.ver))[0];
+    const chosenProbe = probes.filter((x) => x.url === S.chosen)[0];
+    if (best && chosenProbe) ok(pv(chosenProbe.ver) === pv(best.ver), '选中的是探测到的最高版本：v' + chosenProbe.ver + '（探测最高 v' + best.ver + '）');
+    else ok(!!S.chosen, '选了地址：' + S.chosen);
+    ok(S.tag === null || /^v?\d+\.\d+\.\d+$/.test(S.tag), 'GitHub tag 发现结果：' + (S.tag || '拿不到（如实 null，不影响选版）'));
+    ok(!S.fallback, '没有退到顺序注入兜底');
   }
-  ok(S.tag === null || /^v?\d+\.\d+\.\d+$/.test(S.tag), 'GitHub tag 发现结果：' + (S.tag || '拿不到（如实标 null，不影响选版）'));
 
   if (A) ok(A.version === window.__EXPECTED_VERSION__, '插件版本 = ' + A.version + '（期望 ' + window.__EXPECTED_VERSION__ + '，= 仓库当前发布件）');
   if (A) ok(A.storage().mode === 'local', '注入形态下存储 = local，自检行会写明：' + A.storage().label);
@@ -53,8 +55,7 @@
   const srcs = [].slice.call(document.getElementsByTagName('script')).map((x) => x.src);
   const main = srcs.filter((u) => /iirose-blacklist\.js\?t=\d+$/.test(u))[0];
   ok(!!main && /cdn\.jsdelivr\.net/.test(main), '主脚本走 CDN + 时间戳绕缓存：' + (main || '没找到'));
-  ok(!S.fallback, '没有退到顺序注入兜底（说明探测本身成功）');
-  ok(!!A && pv(A.version) >= pv(best && best.ver), '实际跑起来的版本不低于任何候选（不会再出现"拉到了却是旧的"）');
+  ok(!!A && (!best || pv(A.version) >= pv(best.ver)), '实际跑起来的版本不低于任何候选（不会再出现"拉到了却是旧的"）');
 
   document.getElementById('out').innerHTML = lines.join('<br>') + '<br><br><b>' + (fail ? ('失败 ' + fail + ' 项') : '全部通过') + '</b>';
   window.__RESULT__ = { total: lines.length, fail: fail };

@@ -153,6 +153,8 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 | 本地调试（`start.bat`） | 直接 `Ctrl+F5`，本地不经 CDN，没有 7 天缓存 |
 | 想固定某个版本 | 用 tag 地址：`.../iirose-blacklist@v0.2.3/loader.js`（或主脚本 `@v0.2.3/iirose-blacklist.js`）|
 
+**刷新了还是不生效？把地址临时钉到本次 tag**：`…iirose-blacklist@v0.3.4/loader.js` —— tag 地址是不可变的，CDN 上第一次请求必然回源，**不可能**给你旧文件（分支地址 `@main` / 不带 ref 的地址都可能被缓存最多 12 小时，且清缓存接口不保证能立刻刷掉分支解析）。
+
 **为什么"刷新了还不生效"**：jsdelivr 给的是 7 天强缓存（`Cache-Control: max-age=604800` —— 地址不变，浏览器**根本不发请求**）。loader 靠 `?t=时间戳` 每次换 URL 绕开它；直连地址只能靠改 `?v=` 或 `Ctrl+F5`（手机用无痕）。另外两个坑（无 ref 地址 = 最新 tag 的快照、`@ref` 可能被限流）写在上面「给朋友用」那三条里。
 
 确认更新成功：面板标题显示版本号；或控制台 `__IIROSE_BLACKLIST__.version`；面板自检行还会写明「存储：官方 settings / 本地注入（localStorage）」。
