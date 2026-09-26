@@ -1,18 +1,4 @@
-/*!
- * iirose 拉黑屏蔽 · iirose-blacklist v0.2.0
- * 作者：Corvin Hermes（为北海做）
- *
- * 作用：在 iirose（蔷薇花园）里拉黑某人后 ——
- *   1) 同一房间里看不到 TA 的头像和消息
- *   2) 收不到 TA 的私聊（无消息、无未读红点、无提示音）
- *
- * 原理：在 WebSocket 收包层（window.socket._onmessage）把黑名单用户的记录整条剔除，
- *       消息根本不进客户端；再对已渲染的历史消息做 DOM 清扫兜底。
- *       帧格式依据官方文档 XCWQW1/iirose-docs（markdown/event/event_message.md）。
- *
- * 注入：iirose 页面 console → `js -s` 开启自定义 JS → `js` 粘贴本文件 URL。
- * 调试探针：window.__IIROSE_BLACKLIST__  （见文件末尾导出的 API）
- */
+/*! 拉黑屏蔽 v0.3.11 */
 (function () {
   'use strict';
 
