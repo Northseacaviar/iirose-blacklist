@@ -86,18 +86,24 @@ const rowOf = (id) => document.getElementById(id);
     await sleep(200);
   });
 
-  // ---- E3：图片没加载完时从 onclick 取头像；名字里带逗号不能把头像位切错（审查 D7 回归）----
-  await t('E3 名字里带逗号 + 图片未加载：仍取到正确头像（审查 D7 回归）', async () => {
+  // ---- E3：判据只按名字 —— 头像与名单一致但名字不同，卡片不能被隐（防误伤回归）----
+  await t('E3 头像相同、名字不同 → 卡片不隐（只按名字判据）', async () => {
     A.setKeepHistory(false);
-    const holder = panelWith('甲,乙', 'https://s.iirose.com/images/icon/cartoon/900777.jpg');
+    A.block(BLOCK, NAME);
+    await sleep(200);
+    const holder = panelWith('路人甲', 'https://s.iirose.com/images/icon/cartoon/900001.jpg');   // 同一张头像
     document.body.appendChild(holder);
-    await sleep(300);
-    const rows = A._diag.mailCards().rows;
-    const mine = rows.filter((r) => r.name === '甲,乙');
-    eq(mine.length, 1, '没读到这张卡');
-    eq(mine[0].avatar, 'https://s.iirose.com/images/icon/cartoon/900777.jpg', '头像位取错了（大概率又用了 split(",")）');
-    eq(mine[0].avatarKey, '900777', '头像指纹不对');
+    await sleep(350);
+    const card = holder.querySelector('.cardTag');
+    eq(card.style.display, '', '头像相同就隐了卡片 —— 会误伤共用预置头像的路人');
+    const holder2 = panelWith(NAME, 'https://s.iirose.com/images/icon/cartoon/123456.jpg');       // 名字命中、头像不同
+    document.body.appendChild(holder2);
+    await sleep(350);
+    eq(holder2.querySelector('.cardTag').style.display, 'none', '名字命中却没隐');
     holder.parentNode.removeChild(holder);
+    holder2.parentNode.removeChild(holder2);
+    A.unblock(BLOCK);
+    await sleep(200);
   });
 
   const fail = results.filter((r) => !r.ok);

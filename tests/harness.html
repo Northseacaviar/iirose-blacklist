@@ -890,22 +890,24 @@ async function run() {
     eq(window.__RECV[0], like, '解除拉黑后点赞通知应恢复到达');
   });
 
-  await t('W54 信箱帧：房间公告（3 字段）一律不动；没名字时按头像也能认人（帧短路径 vs DOM 完整 URL）', async () => {
+  await t('W54 判据只按名字（北海 2026-09-26 拍板）：头像完全相同但名字不同 → 不拦；公告照旧不动', async () => {
     const A = window.__IIROSE_BLACKLIST__;
     A.setEnabled(true);
     const uid = 'mailbox0005ee';
-    // 让他先发一条房间消息：插件把 uid→头像 记进"最近出现"，拉黑时快照进名单
     window.socket._onmessage(F.roomOne(uid, '信箱头像人', 'cartoon/900777'));
     await sleep(120);
     try {
-      A.block(uid);                     // 不传名字：逼它用记录里那份信息
+      A.block(uid);
       const notice = F.mailNotice('服务器维护公告');
       window.__RECV.length = 0;
       window.socket._onmessage(notice);
       eq(window.__RECV[0], notice, '房间公告被误拦了（站级通知一律不动）');
       window.__RECV.length = 0;
       window.socket._onmessage(F.mailFollower('换了个名字', 'https://s.iirose.com/images/icon/cartoon/900777.jpg'));
-      eq(window.__RECV.length, 0, '头像命中却没拦下（帧里 cartoon/900777 与记录里同一张）');
+      eq(window.__RECV.length, 1, '头像相同却被拦了 —— 判据又跑回头像去了（会误伤共用预置头像的路人）');
+      window.__RECV.length = 0;
+      window.socket._onmessage(F.mailFollower('信箱头像人', 'cartoon/999999'));
+      eq(window.__RECV.length, 0, '名字命中却没拦下');
     } finally { A.unblock(uid); }
   });
 

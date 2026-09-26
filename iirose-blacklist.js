@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.1';
-  const VERSION_CODE = 21;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.2';
+  const VERSION_CODE = 22;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -127,12 +127,12 @@
     for (const k in (raw.uids || {})) {
       if (!k) continue;
       const it = raw.uids[k] || {};
-      s.uids[k] = { name: it.name ? String(it.name) : '', ts: Number(it.ts) || Date.now(), avatar: it.avatar ? String(it.avatar) : '' };
+      s.uids[k] = { name: it.name ? String(it.name) : '', ts: Number(it.ts) || Date.now() };
     }
     for (const k in (raw.seen || {})) {
       if (!k) continue;
       const it = raw.seen[k] || {};
-      s.seen[k] = { name: it.name ? String(it.name) : '', ts: Number(it.ts) || 0, avatar: it.avatar ? String(it.avatar) : '' };
+      s.seen[k] = { name: it.name ? String(it.name) : '', ts: Number(it.ts) || 0 };
     }
     for (const k in s.counters) if (typeof raw.counters?.[k] === 'number') s.counters[k] = raw.counters[k];
     if (raw.conf && typeof raw.conf === 'object') {
@@ -174,15 +174,12 @@
       .replace(/&#39;/g, "'").replace(/&amp;/g, '&');
   }
 
-  function recordSeen(store, uid, name, avatar) {
+  function recordSeen(store, uid, name) {
     if (!uid) return;
     const old = store.seen[uid];
     store.seen[uid] = {
       name: name || (old && old.name) || '',
       ts: Date.now(),
-      // 头像链接一并记下：信箱（@ 帧）里没有 uid，只能按 名字/头像 认人，
-      // 拉黑时从这里快照一份到名单里（见 block）。没头像时不覆盖已有的（帧里偶尔会缺）。
-      avatar: avatar ? String(avatar) : ((old && old.avatar) || ''),
     };
     const keys = Object.keys(store.seen);
     if (keys.length > MAX_SEEN) {
@@ -224,12 +221,12 @@
     const out = { data: data, changed: false, blocked: [], kind: null, abnormal: false };
     if (typeof data !== 'string' || data.length < 2) return out;
 
-    let head, kind, uidIdx, nameIdx, avatarIdx, multi = true;
+    let head, kind, uidIdx, nameIdx, multi = true;
     if (data.charCodeAt(0) === 0x22) {            // "
-      if (data.charCodeAt(1) === 0x22) { head = '""'; kind = 'priv'; uidIdx = 1; nameIdx = 2; avatarIdx = 3; }
-      else { head = '"'; kind = 'room'; uidIdx = 8; nameIdx = 2; avatarIdx = 1; }
+      if (data.charCodeAt(1) === 0x22) { head = '""'; kind = 'priv'; uidIdx = 1; nameIdx = 2; }
+      else { head = '"'; kind = 'room'; uidIdx = 8; nameIdx = 2; }
     } else if (data.charCodeAt(0) === 0x3d) {     // =
-      head = '='; kind = 'danmaku'; uidIdx = 7; nameIdx = 0; avatarIdx = 5; multi = false;
+      head = '='; kind = 'danmaku'; uidIdx = 7; nameIdx = 0; multi = false;
     } else if (data.charCodeAt(0) === 0x40) {     // @ 信箱/通知帧（见 filterMailFrame）
       return filterMailFrame(data, store, hooks, out);
     } else {
@@ -248,7 +245,7 @@
       const uid = f[uidIdx];
       if (looksLikeUid(uid)) {
         const name = unescapeHtml(f[nameIdx]);
-        if (hooks && hooks.onSeen) hooks.onSeen(uid, name, kind, f[avatarIdx]);
+        if (hooks && hooks.onSeen) hooks.onSeen(uid, name, kind);
         if (store.enabled && isBlockedIn(store, uid)) {
           out.blocked.push({ uid: uid, name: name, kind: kind });
           if (hooks && hooks.onBlock) hooks.onBlock(uid, kind);
@@ -308,7 +305,7 @@
   // 解析一条信箱记录；null = 形状不认识（残片/未知类型），调用方必须原样放行
   function mailRecordInfo(f) {
     if (!f || typeof f.length !== 'number') return null;   // 手调 _diag 时传 null 不该抛
-    if (f.length === 3) return { type: 'notice', name: '', avatar: '', blockable: false };
+    if (f.length === 3) return { type: 'notice', name: '', blockable: false };
     if (f.length !== 7) return null;
     const marker = String(f[3] || '');
     if (marker.charAt(0) !== "'") return null;
@@ -321,35 +318,20 @@
     if (!/^[1-3]$/.test(String(f[2] || ''))) return null;
     if (!/^\d{9,11}$/.test(String(f[5] || ''))) return null;
     if (!/^[0-9a-fA-F]{6}$/.test(String(f[6] || ''))) return null;
-    return { type: type, name: f[0] || '', avatar: f[1] || '', blockable: type !== 'payment' };
+    return { type: type, name: f[0] || '', blockable: type !== 'payment' };
   }
 
-  // 头像指纹：同一个人的头像在两种地方形态不同 ——
-  //   帧里可能是 'cartoon/600264'，DOM 里是 'https://s.iirose.com/images/icon/cartoon/600264.jpg'；
-  // 统一成"末段去扩展名"（600264 / 5512-G6）后跨形态可比，撞车概率极低（站点文件名含随机段）。
-  // 名字比头像稳（换头像不改名），头像比名字稳（改名不改头像）——两个任一命中即算命中（OR）。
-  function avatarKey(v) {
-    let s = String(v == null ? '' : v).trim().toLowerCase();
-    if (!s) return '';
-    const cut = s.search(/[#?]/);
-    if (cut >= 0) s = s.slice(0, cut);
-    s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, '');          // 去协议与域名
-    const slash = s.lastIndexOf('/');
-    if (slash >= 0) s = s.slice(slash + 1);                // 只留最后一段
-    return s.replace(/\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|ico)$/, ''); // 去扩展名（白名单：.svg/.avif 也剥，否则与帧里的无扩展名形态判不等）
-  }
-
-  // 命中黑名单？名字（trim + 小写完全相等）或头像指纹任一命中即算
-  function mailHit(store, name, avatar) {
+  // 命中黑名单？**只按名字**（trim + 小写完全相等）。
+  // 北海 2026-09-26 拍板：不用头像判据 —— 站点预置卡通头像（如 cartoon/600264）可能多用户共用，
+  // 按头像认人会把无关路人一起拦掉（误伤）；宁可漏拦，不误伤。
+  function mailHit(store, name) {
     if (!store || !store.uids) return null;                 // 手调 _diag 时传 null 不该抛
     const nm = String(name == null ? '' : name).trim().toLowerCase();
-    const ak = avatarKey(avatar);
-    if (!nm && !ak) return null;
+    if (!nm) return null;
     for (const uid in store.uids) {
       const it = store.uids[uid] || {};
       const bn = String(it.name || '').trim().toLowerCase();
-      if (nm && bn && nm === bn) return { uid: uid, by: 'name' };
-      if (ak && it.avatar && avatarKey(it.avatar) === ak) return { uid: uid, by: 'avatar' };
+      if (bn && nm === bn) return { uid: uid, by: 'name' };
     }
     return null;
   }
@@ -364,7 +346,7 @@
       const info = mailRecordInfo(rec.split('>'));
       if (!info || !info.blockable || !store.enabled) { kept.push(rec); continue; }
       const name = unescapeHtml(info.name);
-      const hit = mailHit(store, name, info.avatar);
+      const hit = mailHit(store, name);
       if (!hit) { kept.push(rec); continue; }
       out.kind = 'mail';
       out.blocked.push({ uid: hit.uid, name: name, kind: 'mail', type: info.type });
@@ -480,11 +462,11 @@
   }
 
   const hookCbs = {
-    onSeen: (uid, name, kind, avatar) => {
+    onSeen: (uid, name, kind) => {
       if (myUid() && uid === myUid()) return;               // 自己不进"最近出现"
       const old = store.seen[uid];
       if (old && old.name === name && Date.now() - (old.ts || 0) < 30000) return; // 降噪
-      recordSeen(store, uid, name, avatar);
+      recordSeen(store, uid, name);
       saveStore();
       if (ui && ui.refreshSeen) ui.refreshSeen();
     },
@@ -615,7 +597,7 @@
    *     <div class="cardTagI">
    *       <div class="cardTagAvatar whoisTouch2" onclick="getProfile(['名字','颜色','头像URL','性别',null])">
    *       <div class="cardTagName textColor">名字</div>
-   * 条目里【没有 uid】（onclick 的 uid 位是 null），所以只能按 名字/头像 认人 —— 与协议侧同一套判据。
+   * 条目里【没有 uid】（onclick 的 uid 位是 null），所以只能按名字认人 —— 判据只按名字。
    * 处理方式：display:none 隐藏（跟私聊会话项一致：可恢复、不删节点，站点结构不受影响）。
    * 「拉黑时保留他的历史消息」开着时：只隐"面板渲染完之后新来的那条"，已经渲染出来的卡片算历史、留着；
    * 关着时（默认）：全部隐。- 
@@ -625,28 +607,12 @@
   let mailPanelSeen = false;      // 面板出现过一次之后，新插入的卡片才算"新"（见 sweepMailCards）
 
   function mailCardParts(row) {
-    let name = '', avatar = '';
+    let name = '';
     try {
       const nameEl = row.querySelector ? row.querySelector('.cardTagName') : null;
       if (nameEl) name = String(nameEl.textContent || '').trim();
-      const img = row.querySelector ? row.querySelector('.cardTagAvatar img') : null;
-      if (img && img.getAttribute) avatar = img.getAttribute('src') || '';
-      if (!avatar) {   // 图片还没加载完：退回 onclick 的参数（getProfile(['名','色','头像','性别',null])）
-        const oc = row.querySelector ? row.querySelector('[onclick*="getProfile"]') : null;
-        const raw = oc && oc.getAttribute ? String(oc.getAttribute('onclick') || '') : '';
-        const m = raw.match(/getProfile\s*\(\s*\[([\s\S]*?)\]/);
-        if (m) {
-          // 只取"引号里"的参数：名字里可能带逗号（审查 D7 实测 '甲,乙' 会把 split(',') 切错，头像位取成颜色位）
-          const parts = [];
-          const re = /'([^']*)'|"([^"]*)"/g;
-          let mm;
-          while ((mm = re.exec(m[1])) !== null) parts.push(mm[1] !== undefined ? mm[1] : mm[2]);
-          if (parts.length >= 3) avatar = String(parts[2]).trim();
-          if (!name && parts.length >= 1) name = String(parts[0]).trim();   // 站点没渲染 .cardTagName 时兜底
-        }
-      }
     } catch (e) { noteError('信箱条目解析', e); }
-    return { name: name, avatar: avatar };
+    return { name: name };
   }
 
   function hideMailCard(row) {
@@ -693,7 +659,7 @@
     const keep = store.conf.keepHistory !== false;
     rows.forEach((row) => {
       const parts = mailCardParts(row);
-      const hit = store.enabled ? mailHit(store, parts.name, parts.avatar) : null;
+      const hit = store.enabled ? mailHit(store, parts.name) : null;
       if (!hit) { showMailCard(row); return; }                  // 解除拉黑 / 关掉屏蔽：还原
       if (keep && (!incremental || firstRender)) return;         // 「保留历史」开着：已有卡片（含首批整批渲染）不动
       n += hideMailCard(row);
@@ -1448,8 +1414,6 @@
     store.uids[uid] = {
       name: name || (store.seen[uid] || {}).name || '',
       ts: Date.now(),
-      // 头像一并快照：信箱（@ 帧）里没有 uid，只能靠 名字/头像 认人（见 mailHit / sweepMailCards）
-      avatar: (store.seen[uid] || {}).avatar || '',
     };
     saveStore();
     if (name) recordSeen(store, uid, name);
@@ -1540,7 +1504,7 @@
         sweepNode: sweepNode,
         isBlockedIn: (u) => isBlocked(u),
         // 信箱（侧栏「信箱」面板 #leaveMsgHolder）逐条报告"认人结果"，用来定位"为什么这条没藏"：
-        // 加了名字/头像但没命中 → 看 avatarKey 两边是不是同一个；命中了却没 hidden → 看 keepHistory 是不是开着
+        // 判据只按名字；名字对上了却没 hidden → 看 keepHistory 是不是开着
         mailCards: function () {
           const rows = mailCardRows(document);
           const uids = {};
@@ -1552,11 +1516,9 @@
             uids: uids,
             rows: rows.map((row) => {
               const parts = mailCardParts(row);
-              const hit = store.enabled ? mailHit(store, parts.name, parts.avatar) : null;
+              const hit = store.enabled ? mailHit(store, parts.name) : null;
               return {
                 name: parts.name,
-                avatar: parts.avatar,
-                avatarKey: avatarKey(parts.avatar),
                 blocked: !!hit, by: hit ? hit.by : '', uid: hit ? hit.uid : '',
                 hidden: row.hasAttribute('data-bl-mail-hidden'),
                 display: row.style.display || '',
@@ -1565,7 +1527,6 @@
             }),
           };
         },
-        avatarKey: avatarKey,
         mailHit: mailHit,
         sweepMail: function () { return sweepMailCards(document, false); },
         lastSweep: function () { const d = lastSweepDiag; lastSweepDiag = []; return JSON.parse(JSON.stringify(d)); },

@@ -9,7 +9,7 @@ const F = require('./frames.js');
 
 const EXPORTS = ['defaultStore', 'normalizeStore', 'isBlockedIn', 'hasUid', 'unescapeHtml',
   'recordSeen', 'looksLikeUid', 'filterFrame', 'findUidByName', 'isRecordShaped', 'findBlockedToken', 'MAX_SEEN',
-  'mailRecordInfo', 'avatarKey', 'mailHit', 'filterMailFrame'];
+  'mailRecordInfo', 'mailHit', 'filterMailFrame'];
 
 function loadCore() {
   const src = fs.readFileSync(SRC, 'utf8');
@@ -80,11 +80,11 @@ function storeWith(uids) {
   return s;
 }
 
-// 信箱用：按 名字/头像 认人，所以名单条目要能带 avatar
+// 信箱用：判据只按名字（名单条目只需 name）
 function storeMail(list) {
   const s = L.defaultStore();
   (list || []).forEach((e) => {
-    s.uids[e.uid] = { name: e.name || '', ts: Date.now(), avatar: e.avatar || '' };
+    s.uids[e.uid] = { name: e.name || '', ts: Date.now() };
   });
   return s;
 }
@@ -160,12 +160,6 @@ t('官方点赞样本：按名字命中时丢弃；未拉黑时字节级透传',
   eq(L.filterFrame(F.docMailLike, s, null).data, null);
   eq(L.filterFrame(F.docMailLike, storeMail([]), null).data, F.docMailLike);
 });
-t('信箱·头像匹配：帧里 cartoon/600264 与 DOM 完整 URL 判为同一人', () => {
-  const s = storeMail([{ uid: F.PRIV_UID, name: '另一个人', avatar: F.MAIL_AVATAR_CART_DOM }]);
-  const r = L.filterFrame(F.docMailLike, s, null);
-  eq(r.data, null);
-  eq(r.blocked[0].uid, F.PRIV_UID);
-});
 t('信箱·转账（打赏）永不丢帧 —— 钱优先（北海 2026-09-26 拍板）', () => {
   const s = storeMail([{ uid: F.ROOM_UID, name: F.MAIL_NAME }]);
   const f = F.mailPayment(F.MAIL_NAME, 'http://x/a.jpg', 5);
@@ -212,21 +206,6 @@ t('信箱·名单里名字为空时不误命中别人', () => {
   const f = F.mailLike('某路人', 'a.jpg');
   eq(L.filterFrame(f, s, null).data, f);
 });
-t('avatarKey 归一：协议/域名/扩展名/#后内容都不影响判等', () => {
-  eq(L.avatarKey('https://s.iirose.com/images/icon/cartoon/600264.jpg'), '600264');
-  eq(L.avatarKey('cartoon/600264'), '600264');
-  eq(L.avatarKey('http://r.iirose.com/i/26/6/7/8/5844-NU.jpg#e'), '5844-nu');
-  eq(L.avatarKey(''), '');
-  eq(L.avatarKey(null), '');
-});
-t('mailHit：先名字后头像，都没命中返回 null', () => {
-  const s = storeMail([{ uid: 'u1', name: '甲', avatar: 'cartoon/111' }]);
-  const byName = L.mailHit(s, '甲', 'cartoon/222');
-  eq(byName.uid, 'u1'); eq(byName.by, 'name');
-  const byAvatar = L.mailHit(s, '乙', 'https://s.iirose.com/images/icon/cartoon/111.jpg');
-  eq(byAvatar.uid, 'u1'); eq(byAvatar.by, 'avatar');
-  eq(L.mailHit(s, '乙', 'cartoon/999'), null);
-});
 t('mailRecordInfo：3 字段=公告（不可拦）、7 字段认标记、其余放行', () => {
   eq(L.mailRecordInfo(['文本', 'bg', '1']).type, 'notice');
   eq(L.mailRecordInfo(['文本', 'bg', '1']).blockable, false);
@@ -260,7 +239,7 @@ t('信箱·7 字段形状复核：性别/时间戳/颜色任一不合规都算"�
   eq(bad(5, '17626130'), null, '时间戳 8 位（实现按 9~11 位放宽，故意留了余量）');
   eq(bad(6, 'zzzzzz'), null, '颜色非 hex');
   eq(bad(6, 'd28ad'), null, '颜色 5 位');
-  eq(JSON.stringify(bad(1, 'a.jpg')), JSON.stringify({ type: 'like', name: '甲', avatar: 'a.jpg', blockable: true }), '其它格不该被牵连');
+  eq(JSON.stringify(bad(1, 'a.jpg')), JSON.stringify({ type: 'like', name: '甲', blockable: true }), '其它格不该被牵连');
 });
 t('信箱·手调 _diag 时传 null/undefined 不该抛（审查 C5）', () => {
   eq(L.mailRecordInfo(null), null);
@@ -270,14 +249,6 @@ t('信箱·手调 _diag 时传 null/undefined 不该抛（审查 C5）', () => {
   eq(L.mailHit(null, '甲', 'a.jpg'), null);
   eq(L.mailHit(undefined, '甲', 'a.jpg'), null);
 });
-t('头像指纹·.svg / .avif / .ico 也要剥掉（审查 C3：否则与帧里的无扩展名形态判不等）', () => {
-  eq(L.avatarKey('https://s.iirose.com/images/icon/cartoon/600264.svg'), '600264');
-  eq(L.avatarKey('cartoon/600264'), '600264');
-  eq(L.avatarKey('a/600264.JPG'), '600264');
-  eq(L.avatarKey('https://x/y/600264.avif'), L.avatarKey('cartoon/600264'));
-  eq(L.avatarKey(''), '');
-  eq(L.avatarKey(null), '');
-});
 t('统计·mail 计数能落盘、清空统计也认得它（审查 C2：原来只在内存里，重启清零）', () => {
   const d = L.defaultStore();
   ok('mail' in d.counters, '默认 counters 里没有 mail 键 → 永远落不了盘');
@@ -286,27 +257,6 @@ t('统计·mail 计数能落盘、清空统计也认得它（审查 C2：原来�
   eq(norm.counters.room, 3);
   eq(norm.counters.dom, 2);
   eq(L.normalizeStore({}).counters.mail, 0, '老落盘（没有 mail 键）要补 0 而不是 undefined');
-});
-t('onSeen 带出头像链接（信箱只能按名字/头像认人，拉黑时要快照这份）', () => {
-  const got = [];
-  L.filterFrame(F.room3, storeMail([]), { onSeen: (uid, name, kind, avatar) => got.push([uid, name, kind, avatar]) });
-  eq(got.length, 3);
-  eq(got[0][3], 'https://static.codemao.cn/i/23/10/21/22/2620-Z1.bmp');
-  eq(got[0][2], 'room');
-});
-t('recordSeen 记头像：给了就更新，没给不覆盖旧值', () => {
-  const s = storeMail([]);
-  L.recordSeen(s, 'u1', '甲', 'http://a/b.jpg');
-  eq(s.seen['u1'].avatar, 'http://a/b.jpg');
-  L.recordSeen(s, 'u1', '甲');
-  eq(s.seen['u1'].avatar, 'http://a/b.jpg');
-  L.recordSeen(s, 'u1', '甲', 'http://a/c.jpg');
-  eq(s.seen['u1'].avatar, 'http://a/c.jpg');
-});
-t('normalizeStore 保留头像字段，缺省给空串', () => {
-  const s = L.normalizeStore({ v: 1, uids: { u1: { name: '甲', ts: 1, avatar: 'cartoon/9' }, u2: { name: '乙', ts: 2 } } });
-  eq(s.uids['u1'].avatar, 'cartoon/9');
-  eq(s.uids['u2'].avatar, '');
 });
 
 console.log('\n== 协议层：其它帧必须零影响 ==');
