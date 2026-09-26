@@ -57,6 +57,13 @@
     <div class="textOverflowEllipsis">安静的房间</div>
     <div class="textOverflowEllipsis2Line">简介二</div>
   </div>
+  <!-- 形态怪的两张（v0.3.13）：空 rid 不许动；大写 rid 要能被小写名单命中 -->
+  <div class="whoisTouch2 mapHolderRoomListItem shopItem" rid="" n="2_1_">
+    <div class="textOverflowEllipsis">没有 id 的房间</div>
+  </div>
+  <div class="whoisTouch2 mapHolderRoomListItem shopItem" rid="DD1E2F3A4B5C" n="2_1_">
+    <div class="textOverflowEllipsis">大写 id 的房间</div>
+  </div>
 </div>
 
 <pre id="out"></pre>
@@ -1051,6 +1058,134 @@ async function run() {
     await sleep(200);
     eq(roomCard(RID_A).style.display, '', '解除后没还原');
     eq(roomCard(RID_B).style.display, '', '解除后没还原（B）');
+  });
+
+  await t('W60 面板「启用屏蔽」开关这条路：关掉要还原房间卡片，打开要再次隐藏（此前只测了 API setEnabled）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    const p = await ensurePanel();
+    ok(p, '面板没打开');
+    const swSel = '[data-bl-key="enabled"]';
+    ok(p.querySelector(swSel), '面板里找不到「启用屏蔽」开关行');
+    try {
+      A.blockRoom(RID_A, '吵闹的房间');
+      await sleep(200);
+      eq(roomCard(RID_A).style.display, 'none', '屏蔽后卡片没隐（前置条件不成立）');
+      realClick(p.querySelector(swSel));
+      await sleep(300);
+      eq(roomCard(RID_A).style.display, '', '关掉面板开关后房间卡片没还原');
+      realClick(p.querySelector(swSel));
+      await sleep(300);
+      eq(roomCard(RID_A).style.display, 'none', '重新打开开关后房间卡片没再次隐藏');
+    } finally {
+      A.unblockRoom(RID_A); A.setEnabled(true);
+    }
+  });
+
+  await t('W61 兜底还原：已隐藏的卡片被站点改掉 rid（选择器不再匹配）→ 整页清扫要把它放出来，不留永久空位', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    const a = roomCard(RID_A);
+    try {
+      A.blockRoom(RID_A, '吵闹的房间');
+      await sleep(150);
+      eq(a.style.display, 'none', '屏蔽后卡片没隐（前置条件不成立）');
+      a.removeAttribute('rid');
+      A.sweep();
+      await sleep(150);
+      eq(a.style.display, '', '丢了 rid 的已隐藏卡片没被兜底还原（永久隐形）');
+      eq(a.hasAttribute('data-bl-room-hidden'), false, '兜底还原后标记没清掉');
+    } finally {
+      a.setAttribute('rid', RID_A);
+      A.unblockRoom(RID_A);
+    }
+  });
+
+  await t('W62 形态怪的卡片：rid="" 一行不动；大写 rid 卡片要能被小写名单命中', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    const empty = document.querySelector('#roomListBox .mapHolderRoomListItem[rid=""]');
+    const upper = document.querySelector('#roomListBox .mapHolderRoomListItem[rid="DD1E2F3A4B5C"]');
+    ok(empty && upper, '古怪 rid 的夹具缺失');
+    try {
+      A.blockRoom('dd1e2f3a4b5c', '大写 id 的房间');
+      await sleep(200);
+      eq(upper.style.display, 'none', '名单小写、卡片大写 → 没命中（大小写没归一）');
+      eq(empty.style.display, '', '空 rid 的卡片被动了（应原样不动）');
+    } finally {
+      A.unblockRoom('DD1E2F3A4B5C');
+      A.sweep();
+    }
+    await sleep(150);
+    eq(upper.style.display, '', '解除后大写卡片没还原');
+  });
+
+  await t('W63 节点复用：卡片 detach→attach 仍隐藏；站点改写 rid 后要立刻按新 rid 判定（不再等 5 秒）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    const box = document.getElementById('roomListBox');
+    const a = roomCard(RID_A);
+    try {
+      A.blockRoom(RID_A, '吵闹的房间');
+      await sleep(150);
+      box.removeChild(a);
+      box.appendChild(a);
+      await sleep(250);
+      eq(a.style.display, 'none', 'detach/attach 后没保持隐藏');
+
+      a.setAttribute('rid', RID_C);       // 站点把这张卡复用成另一个房间
+      await sleep(250);
+      eq(a.style.display, '', 'rid 被改写后没立刻放开（多了一屏错误隐藏窗口）');
+      a.setAttribute('rid', RID_A);
+      await sleep(250);
+      eq(a.style.display, 'none', 'rid 改回被屏蔽的房间后没立刻隐藏');
+    } finally {
+      a.setAttribute('rid', RID_A);
+      A.unblockRoom(RID_A);
+    }
+  });
+
+  await t('W64 排障出口：_diag.rooms() 报告卡片数/逐条状态，_diag.sweepRooms() 返回隐藏数；面板提示行显示识别到的卡片数', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    A.sweep();
+    await sleep(150);
+    const d = A._diag.rooms();
+    eq(d.cardCount >= 3, true, 'cardCount 少于夹具里的房间卡片数：' + d.cardCount);
+    eq(d.rows.length, d.cardCount, 'rows 与 cardCount 不一致');
+    eq(d.orphans.length, 0, '不该有孤儿节点：' + JSON.stringify(d.orphans));
+    eq(typeof A._diag.sweepRooms(), 'number', 'sweepRooms 应返回隐藏张数');
+    try {
+      A.blockRoom('dd1e2f3a4b5c', '大写 id 的房间');
+      await sleep(150);
+      const hit = A._diag.rooms().rows.filter((r) => String(r.rid).toLowerCase() === 'dd1e2f3a4b5c')[0];
+      ok(hit, '_diag.rooms() 里找不到被屏蔽的那张卡');
+      eq(hit.hit, true, 'diag 没标出命中');
+      eq(hit.hidden, true, 'diag 没标出已隐藏');
+      eq(hit.display, 'none', 'diag 报的 display 与实际不符');
+    } finally { A.unblockRoom('DD1E2F3A4B5C'); }
+    const p = await ensurePanel();
+    await sleep(150);
+    ok(/识别到 \d+ 张房间卡片/.test(p.textContent || ''), '面板提示行没显示"识别到 N 张房间卡片"：' + (p.textContent || '').slice(0, 120));
+  });
+
+  await t('W65 解除屏蔽后，该房间要回到面板「最近出现的房间」列表里（用户据此判断解除成功）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    const p = await ensurePanel();
+    ok(A.store.rooms[RID_B], '前置：RID_B 应已被采集');
+    // 只看「最近出现」那一列（按钮文案是「屏蔽」）—— 屏蔽后它还会出现在「已屏蔽房间」列（按钮是「解除」）
+    const seenRow = () => Array.from(p.querySelectorAll('div'))
+      .filter((d) => d.querySelector && d.querySelector('button') && (d.textContent || '').indexOf(RID_B) >= 0)
+      .filter((d) => ((d.querySelector('button').textContent || '').trim()) === '屏蔽').pop() || null;
+    try {
+      A.blockRoom(RID_B, '安静的房间');
+      await sleep(200);
+      eq(seenRow(), null, '已屏蔽的房间还留在「最近出现的房间」列表里');
+    } finally {
+      A.unblockRoom(RID_B);
+    }
+    await sleep(200);
+    ok(seenRow(), '解除后该房间没回到「最近出现的房间」列表');
   });
 
   const fail = results.filter((r) => !r.ok);
