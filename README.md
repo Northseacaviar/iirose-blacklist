@@ -168,7 +168,7 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
    （`extJs` 支持空格分隔多个地址，可与点歌插件同时注入）
 2. 朋友用：注入 loader 那一行（见上面「给朋友用」）
 3. 界面：右下角悬浮球 🚫 → 面板（拉黑/解除拉黑全在这里）
-4. 自测：`node tests/core.test.js`（核心逻辑 56 项）、浏览器打开 `tests/harness.html`（联调 54 项）、`tests/mail-fresh.html`（信箱边界 4 项）、`tests/official-mode.html`（官方形态 23 项）、`tests/migration.html`（老配置迁移 7 项）、`tests/loader-test.html`（loader 本地 6 项）、`tests/probe3-selftest.html`（信箱真帧探针 11 项：探针不把插件顶掉、原始帧与判定一致）、`tests/probe3-selftest-b.html`（探针先跑、插件后到的顺序 6 项）、`tests/loader-stub.html`（loader v2 的选版逻辑 16 项，用桩控造四种「谁新谁旧」的组合）与 `tests/loader-cdn.html`（loader 走真 CDN = 朋友路径）
+4. 自测：`node tests/core.test.js`（核心逻辑 56 项）、浏览器打开 `tests/harness.html`（联调 54 项）、`tests/mail-fresh.html`（信箱边界 4 项）、`tests/mail-pop.html`（信箱「不弹面板」6 项：站点行为按 messages.js 桩化）、`tests/official-mode.html`（官方形态 23 项）、`tests/migration.html`（老配置迁移 7 项）、`tests/loader-test.html`（loader 本地 6 项）、`tests/probe3-selftest.html`（信箱真帧探针 11 项：探针不把插件顶掉、原始帧与判定一致）、`tests/probe3-selftest-b.html`（探针先跑、插件后到的顺序 6 项）、`tests/loader-stub.html`（loader v2 的选版逻辑 16 项，用桩控造四种「谁新谁旧」的组合）与 `tests/loader-cdn.html`（loader 走真 CDN = 朋友路径）
 5. **发版最后一步（新增，别漏）：`node tools/purge-cdn.js`** —— 清 jsdelivr 的 `@main`／无 ref 缓存并逐主机复核版本，落后就退出码 1。**不跑它，用户那边可能继续拿旧版最多 12 小时**（v0.3.0~v0.3.2 三次发版就是这么白白没送达的；见「版本」段 v0.3.3 的真因一）。
    - **推荐跑法：用 `file://` 在一个全新浏览器会话里打开**（例：`file:///D:/iirose-blacklist/tests/harness.html`）—— 实测 28 秒跑完、且不掉线。**别用 `http://127.0.0.1:端口` 长跑**：CDP 会话约 110 秒必断，守护进程随后会重建浏览器，跑到一半的结果连同页面一起没。harness 会把结果写进 localStorage 键 `bl_harness_result`，掉线后重开同源页面还能读回。
    - **跑之前先确认标签页是前台**（`document.hidden` 应为 false，必要时 `Page.bringToFront`）。后台标签会被 Chrome 节流：定时器被拉长到分钟级，表现就是"测试页一直卡在跑测试中…"，`harness` 曾因此在 50/54 处停了好几分钟；切回前台后立刻跑完。**不是卡死，也不是插件问题 —— 先看 `document.hidden`。**
@@ -226,8 +226,20 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 
 ## 版本
 
-**发布 tag**：`v0.2.0`（合规外壳）→ `v0.2.1`（loader v1）→ `v0.2.2`（loader v1.1 + vibecoding 署名）→ `v0.2.3`（loader v1.2 降级链 + 成本信息进文档）→ `v0.2.4`（插件 v0.2.1：拉黑即清历史 + 点播卡片）→ `v0.2.5`（插件 v0.2.2：老配置迁移，修"卡片清了、文字还在"）→ `v0.2.6`（插件 v0.2.4：拆掉右键/长按拉黑菜单，拉黑只走面板）→ `v0.3.0`（插件 v0.3.0：屏蔽信箱通知）→ `v0.3.1`（插件 v0.3.1：审查小问题 4 条全修）→ `v0.3.2`（插件 v0.3.2：判据改为只按名字，头像判据整块移除）→ `v0.3.3`（插件 v0.3.3：修「面板空着时第一条通知不隐」+ 发版流程补 CDN 清缓存）→ **`v0.3.4`（loader v2.0：先比版本再注入，不再被 `@main` 的 12 小时缓存坑；插件本体无改动）**。
+**发布 tag**：`v0.2.0`（合规外壳）→ `v0.2.1`（loader v1）→ `v0.2.2`（loader v1.1 + vibecoding 署名）→ `v0.2.3`（loader v1.2 降级链 + 成本信息进文档）→ `v0.2.4`（插件 v0.2.1：拉黑即清历史 + 点播卡片）→ `v0.2.5`（插件 v0.2.2：老配置迁移，修"卡片清了、文字还在"）→ `v0.2.6`（插件 v0.2.4：拆掉右键/长按拉黑菜单，拉黑只走面板）→ `v0.3.0`（插件 v0.3.0：屏蔽信箱通知）→ `v0.3.1`（插件 v0.3.1：审查小问题 4 条全修）→ `v0.3.2`（插件 v0.3.2：判据改为只按名字，头像判据整块移除）→ `v0.3.3`（插件 v0.3.3：修「面板空着时第一条通知不隐」+ 发版流程补 CDN 清缓存）→ `v0.3.4`（loader v2.0：先比版本再注入，不再被 `@main` 的 12 小时缓存坑；插件本体无改动）→ **`v0.3.5`（插件 v0.3.4：被屏蔽者来信箱**不弹面板/不响铃/不推未读**）**。
 **只有插件本体（`src/`）改动才升 `VERSION` 与 `VERSION_CODE`**（官方规范要求 versionCode 每次发布 +1）；loader 与文档改动不动插件版本。
+
+- 插件 v0.3.4（tag `v0.3.5`；2026-09-26，北海真机反馈「屏蔽了信箱消息，但信箱还是弹出来了」）：
+  - **站点侧机制（逆向文档 `iirose-re-docs` 的 `docs/reference/src/messages.js`，这次是拿源码对过的，不再靠猜）**：
+    - 帧入口（L13620）：`@*` 帧 → `Init.fullPanel(9)` → `Objs.leaveMsgHolder.function.get(记录串)`；
+    - 记录字段（L22282）与我们既有的解析**完全一致**：`名字>头像>性别>标记(+附言)>背景>时间戳>颜色`，标记位 `p[3]` 以 `'` 开头、第 2 个字符是类型（`$` 金币变动 / `^` 关注 / `*` 点赞 / `h` 点踩 …）；3 字段是房间记录、5 字段是另一类通知（我们不认 → 原样放行）；
+    - 通知副作用（L22445 附近）：逐条渲染 `.cardTag` → push 桌面未读（`Constant.NOTIFY.MAIL`）→ **`panelAnimate(40, 1)`（这就是"信箱弹出来"）** → `Utils.Resource.notiSound("mail")`（提示音）；
+    - 金币加法（L22285 的 `case "$"`）**在 `get()` 里**：`Variable.coin += 金额` —— 所以转账那条记录绝不能抽掉，否则账不更新。
+  - **改法（界面层"静默闸"，不动钱的账）**：`filterMailFrame` 里统计这一帧"被屏蔽者来的记录"和"别人的记录"；若**全是**被屏蔽者的记录、且有记录活了下来（转账），就开闸 600ms —— 这期间把站点那三件事吞掉：`panelAnimate(40,1)`（每窗最多吞一次，用户自己点开不会连吞）、`Utils.Resource.notiSound("mail")`、`homeHolder.push(Constant.NOTIFY.MAIL)`。帧本身照旧透传给站点（金币加法、落盘、卡片渲染都没变），卡片仍由既有的 DOM 清扫隐掉。
+  - **回归**：新增 `tests/mail-pop.html` **6/6** —— 站点行为按 `messages.js` 真实实现桩化（假 `panelAnimate`/`notiSound`/`homeHolder.push`/`leaveMsgHolder.function.get` + 按 L13620 分派帧）：
+    P1 被屏蔽者转账 → 不弹/不响/不推未读、**站点照旧收到记录且 `Variable.coin` 照加**、卡片进 DOM 后被隐；P2 被屏蔽者点赞 → 整帧被丢（站点连帧都收不到）；P3 别人的通知 → 弹/响/推一切照旧、卡片不隐（零影响）；P4 混合帧 → 有别人的通知就照旧弹；P5 用户自己点信箱不受影响（闸内最多吞一次，且第二次点击/闸过期后必生效）。
+    其余：核心 **56/56**、联调 **54/54**、信箱边界 **4/4**、迁移 **7/7**。
+  - **仍未真机复验**：`@*` 帧的真实字节（形状已由站点源码 + 官方样本两处对上，但没抓过真机帧）。真机排障入口：`__IIROSE_BLACKLIST__._diag.mailSilence()` 看三处闸装没装上、开没开。
 
 - loader v2.0（2026-09-26，事故收口；插件本体无改动，`VERSION` 不升）：**v1.2 的“降级链”治不了“拉到的是旧的”**。
   - 现场：v1.2 把 `@main` 当最新，只在“拉不到”时才换下一个地址；而 jsdelivr 的分支缓存是 12 小时，`?t=时间戳` 只绕浏览器缓存。于是 v0.3.0/0.3.1/0.3.2 连发三版、用户页面上跑的仍是 v0.2.4（探针 dump 里面板标题写着 `v0.2.4`、v0.3.0 才有的 `data-bl-mail-hidden` 出现 0 次）。

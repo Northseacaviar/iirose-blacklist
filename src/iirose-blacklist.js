@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.3';
-  const VERSION_CODE = 23;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.4';
+  const VERSION_CODE = 24;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -341,13 +341,18 @@
     const prefix = data.slice(0, 2);            // '@' + 子类型字符（官方样本为 '@*'）
     const recs = data.slice(2).split('<');
     const kept = [];
+    let keptBlocked = 0, keptClean = 0;         // 活下来的记录里：被屏蔽者来的 / 别人的（决定要不要开静默闸）
     for (let i = 0; i < recs.length; i++) {
       const rec = recs[i];
       const info = mailRecordInfo(rec.split('>'));
-      if (!info || !info.blockable || !store.enabled) { kept.push(rec); continue; }
-      const name = unescapeHtml(info.name);
-      const hit = mailHit(store, name);
-      if (!hit) { kept.push(rec); continue; }
+      const name = info ? unescapeHtml(info.name) : '';
+      const hit = (info && store.enabled && name) ? mailHit(store, name) : null;
+      if (!info || !store.enabled) { kept.push(rec); if (info) keptClean++; else keptClean++; continue; }
+      if (!hit) { kept.push(rec); keptClean++; continue; }
+      if (!info.blockable) {                    // 转账（'$'）：不丢帧（钱优先），但站点接下来会弹信箱 → 开静默闸
+        kept.push(rec); keptBlocked++;
+        continue;
+      }
       out.kind = 'mail';
       out.blocked.push({ uid: hit.uid, name: name, kind: 'mail', type: info.type });
       if (hooks && hooks.onBlock) hooks.onBlock(hit.uid, 'mail');
@@ -357,7 +362,87 @@
       out.changed = true;
       out.data = kept.some(r => r.length) ? (prefix + kept.join('<')) : null;
     }
+    // 整帧都是被屏蔽者的记录、且还有记录活得下来（转账）→ 站点马上会弹面板/响铃/推通知，开闸全吞掉
+    if (store.enabled && keptBlocked > 0 && keptClean === 0) armMailSilence();
     return out;
+  }
+
+  /* ------------------------------------------------------------------
+   * 信箱通知的"静默闸"（v0.3.4；北海 2026-09-26 要求："被屏蔽的人发信箱消息，不能弹信箱"）
+   *
+   * 站点源码（逆向文档 docs/reference/src/messages.js，本地快照在 docs/技术调研.md 同源）：
+   *   '@*' 帧（L13620）→ Init.fullPanel(9) → Objs.leaveMsgHolder.function.get(记录串)
+   *     · 逐条渲染 .cardTag，并 push 一条桌面通知（Constant.NOTIFY.MAIL，L22445 附近）
+   *     · panelAnimate(40, 1)                 ← 这就是"信箱弹出来了"
+   *     · Utils.Resource.notiSound("mail")    ← 提示音
+   * 转账（'$'）按北海口径**不过滤**（钱优先），所以站点照旧会弹 —— 于是界面层的三件事在这里统一吞掉：
+   *   闸 = 这一帧里被屏蔽者的记录还活着（转账）、且没有别人的记录；
+   *   闸只在帧到达后的短窗口内有效，且"吞弹面板"每窗最多一次（用户自己那一下点开不会被连吞）。
+   * 钱的账不受影响：帧照旧到站点，Variable.coin 的加法、localStorage 的落盘、卡片渲染全在站点自己手里，
+   *   我们只掐掉"看起来像通知"的副作用（弹面板 / 响铃 / 未读推送）。
+   * ------------------------------------------------------------------ */
+  const MAIL_SILENCE_MS = 600;
+  const MAIL_PANEL_ANIM = 40;       // panelAnimate(40, 1) = 弹出信箱面板（站点侧常量）
+  let mailSilentUntil = 0;
+  let mailPopSwallowed = false;
+
+  // CORE 段在单测里是裸 vm（没有外层的 log/console），所以这里一律走安全壳
+  function mailLog() {
+    try { if (typeof log === 'function') log.apply(null, arguments); } catch (e) { }
+  }
+
+  function armMailSilence() {
+    mailSilentUntil = Date.now() + MAIL_SILENCE_MS;
+    mailPopSwallowed = false;
+    mailLog('信箱静默闸：开（被屏蔽者的通知只留卡片，不弹面板/不响铃/不推未读）');
+  }
+  function mailSilenceOn() {
+    return mailSilentUntil > 0 && Date.now() <= mailSilentUntil;
+  }
+
+  // 给站点函数套一层闸（保留原函数引用；已经套过就跳过）
+  function wrapSiteFn(holder, key, makeWrapper) {
+    if (!holder || typeof holder[key] !== 'function' || holder[key].__blWrapped) return false;
+    const orig = holder[key];
+    const wrapped = makeWrapper(orig);
+    wrapped.__blWrapped = 1;
+    holder[key] = wrapped;
+    return true;
+  }
+
+  // 装闸：站点就绪后调用一次；sweepAll 里也会顺手补装（站点晚建的对象照样能套上）
+  function installMailSilenceGuards() {
+    try {
+      wrapSiteFn(window, 'panelAnimate', function (orig) {
+        return function (type, show) {                       // panelAnimate(40, 1) = 弹出信箱
+          if (type === MAIL_PANEL_ANIM && show && mailSilenceOn() && !mailPopSwallowed) {
+            mailPopSwallowed = true;
+            mailLog("信箱静默闸：吞掉一次弹面板");
+            return;
+          }
+          return orig.apply(this, arguments);
+        };
+      });
+    } catch (e) { noteError('信箱静默闸·弹面板', e); }
+    try {
+      const R = window.Utils && window.Utils.Resource;
+      wrapSiteFn(R, 'notiSound', function (orig) {
+        return function (kind) {
+          if (kind === "mail" && mailSilenceOn()) { mailLog("信箱静默闸：吞掉提示音"); return; }
+          return orig.apply(this, arguments);
+        };
+      });
+    } catch (e) { noteError('信箱静默闸·提示音', e); }
+    try {
+      const H = window.Objs && window.Objs.homeHolder;
+      wrapSiteFn(H && H.function, 'push', function (orig) {
+        return function (type) {
+          const N = window.Constant && window.Constant.NOTIFY;
+          if (N && type === N.MAIL && mailSilenceOn()) { mailLog("信箱静默闸：吞掉未读推送"); return; }
+          return orig.apply(this, arguments);
+        };
+      });
+    } catch (e) { noteError('信箱静默闸·未读推送', e); }
   }
 
   // 面板里按名字找 uid：优先最近出现、完全匹配的
@@ -759,6 +844,7 @@
   }
 
   function sweepAll() {
+    try { installMailSilenceGuards(); } catch (e) { noteError('信箱静默闸安装', e); }
     const removed = sweepMessages();
     let mail = 0;
     try { mail = sweepMailCards(null, false); } catch (e) { noteError('信箱卡片清扫', e); }
@@ -1542,6 +1628,18 @@
           };
         },
         mailHit: mailHit,
+        // 信箱静默闸的自检：装没装上、闸开没开（真机排障用）
+        mailSilence: function () {
+          return {
+            installed: {
+              panelAnimate: !!(window.panelAnimate && window.panelAnimate.__blWrapped),
+              notiSound: !!(window.Utils && window.Utils.Resource && window.Utils.Resource.notiSound && window.Utils.Resource.notiSound.__blWrapped),
+              homePush: !!(window.Objs && window.Objs.homeHolder && window.Objs.homeHolder.function && window.Objs.homeHolder.function.push && window.Objs.homeHolder.function.push.__blWrapped),
+            },
+            on: mailSilenceOn(), until: mailSilentUntil, popSwallowed: mailPopSwallowed,
+            windowMs: MAIL_SILENCE_MS, panelAnim: MAIL_PANEL_ANIM,
+          };
+        },
         sweepMail: function () { return sweepMailCards(document, false); },
         lastSweep: function () { const d = lastSweepDiag; lastSweepDiag = []; return JSON.parse(JSON.stringify(d)); },
         // 控件点不动时先跑这个：报告每个开关行/按钮的位置、实际渲染尺寸、该点位命中的元素是谁
