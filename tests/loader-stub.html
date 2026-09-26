@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>loader v2 验收 · 桩测（先比版本再注入）</title>
+<style>
+ body{background:#111;color:#ddd;font:13px/1.7 monospace;padding:16px}
+ .ok{color:#68b26d} .bad{color:#ec4141} .dim{color:#888}
+ iframe{width:420px;height:80px;border:1px solid #333;margin:4px 6px 4px 0;background:#181818}
+</style>
+</head>
+<body>
+<div id="out">跑中…</div>
+<div id="frames"></div>
+<script>
+/* 桩测：验 loader v2 的「先比版本、再注入」在各种"哪个地址是新的"组合下选对没有。
+ * 说明：真 CDN 上没法构造这些组合（不能控制哪个地址旧），所以用桩把 fetch 换掉；
+ *       真链路由 loader-cdn.html 负责。
+ */
+window.__LINES__ = []; window.__FAIL__ = 0;
+function ok(cond, msg) {
+  window.__LINES__.push((cond ? '<span class="ok">ok   </span>' : '<span class="bad">FAIL </span>') + msg);
+  if (!cond) window.__FAIL__++;
+}
+function report() {
+  document.getElementById('out').innerHTML = window.__LINES__.join('<br>')
+    + '<br><br><b>' + (window.__FAIL__ ? ('失败 ' + window.__FAIL__ + ' 项') : '全部通过') + '</b>';
+  window.__RESULT__ = { total: window.__LINES__.length, fail: window.__FAIL__ };
+}
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+function runFrame(c) {
+  return new Promise((resolve) => {
+    const f = document.createElement('iframe');
+    f.src = 'stub-frame.html?case=' + c;
+    document.getElementById('frames').appendChild(f);
+    const t0 = Date.now();
+    const t = setInterval(() => {
+      let done = false;
+      try { done = !!(f.contentWindow.__FRAME__); } catch (e) { }
+      if (done || Date.now() - t0 > 30000) {
+        clearInterval(t);
+        let data = null;
+        try { data = f.contentWindow.__FRAME__ || null; data && (data.seen = f.contentWindow.__SEEN__ || []); } catch (e) { }
+        resolve(data);
+      }
+    }, 150);
+  });
+}
+
+(async function () {
+  // case 1：GitHub 通（tags v0.3.1 / v0.5.0 / v0.3.3，乱序）→ tag 应是 v0.5.0；
+  //         @main 旧(0.3.2) / @v0.3.3 新(0.3.3) / 无 ref 更旧(0.3.1) → 必须选 0.3.3 那份
+  let r = await runFrame(1);
+  ok(!!r, 'case1 帧有返回');
+  if (r) {
+    ok(r.tag === 'v0.3.3', 'case1 tag 发现：乱序 tags（v0.2.9/v0.3.3/v0.3.1）里挑出最高 ' + r.tag + '（期望 v0.3.3）');
+    ok(!!r.chosen && /@v0\.3\.3\/iirose-blacklist\.js$/.test(r.chosen),
+      'case1 选中的是版本最高的地址：' + r.chosen);
+    const mainProbe = (r.probes || []).find((p) => /@main/.test(p.url));
+    const tagProbe = (r.probes || []).find((p) => /@v0\.3\.3/.test(p.url));
+    ok(mainProbe && mainProbe.ver === '0.3.2', 'case1 探测读到了 @main 的实际版本 ' + (mainProbe && mainProbe.ver) + '（旧版，没被当成最新）');
+    ok(tagProbe && tagProbe.ver === '0.3.3', 'case1 探测读到了 tag 地址的版本 ' + (tagProbe && tagProbe.ver));
+    ok(!r.fallback, 'case1 走的是"比版本"路径，不是顺序兜底');
+    const cands = r.candidates || [];
+    ok(cands.length === new Set(cands).size, 'case1 候选地址无重复（' + cands.length + ' 条，去重生效）');
+    ok(cands.length === 9, 'case1 候选覆盖 3 种取址 × 3 个域名 = ' + cands.length + ' 条（含 tag 那条）');
+    ok((r.injected || []).some((u) => /@v0\.3\.3\/iirose-blacklist\.js\?t=\d+$/.test(u)),
+      'case1 注入的 URL 确实带 ?t= 时间戳：' + ((r.injected || []).find((u) => /@v0\.3\.3/.test(u)) || '没找到'));
+  }
+
+  // case 2：fetch 全挂 → 必须退到顺序注入兜底，而不是什么都不做
+  r = await runFrame(2);
+  ok(!!r && r.fallback === true, 'case2 全取不到时退到顺序注入兜底（fallback=' + (r && r.fallback) + '）');
+  ok(!!r && (r.injected || []).some((u) => /iirose-blacklist\.js/.test(u)), 'case2 兜底真的注入了脚本');
+
+  // case 3：GitHub 挂、jsdelivr 数据 API 通但滞后（只给 0.3.2）→ 不能崩，仍要选出一份可用的
+  r = await runFrame(3);
+  ok(!!r && !!r.chosen, 'case3 API 降级后仍选出了地址：' + (r && r.chosen));
+  ok(!!r && /@main\/iirose-blacklist\.js$/.test(r.chosen || ''), 'case3 选的是探测到的最新那份（@main 0.3.2 > 无 ref 0.3.1）');
+
+  // case 4：两个 API 都挂 + @main 旧(0.3.2) / 无 ref 新(0.3.4) ← 2026-09-26 那次真机事故的形状
+  r = await runFrame(4);
+  ok(!!r && !!r.chosen, 'case4 没有 tag 候选时也能选：' + (r && r.chosen));
+  ok(!!r && /\/Fake\/repo\/iirose-blacklist\.js$/.test(r.chosen || ''),
+    'case4 选中的是"更新的那份"（无 ref 0.3.4），不是排在首位的 @main 0.3.2 ← 这正是 v1.2 栽的地方：' + (r && r.chosen));
+  ok(!!r && !r.fallback, 'case4 不需要退到兜底链');
+
+  report();
+})();
+</script>
+</body>
+</html>
