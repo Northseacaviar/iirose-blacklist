@@ -164,8 +164,10 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
    （`extJs` 支持空格分隔多个地址，可与点歌插件同时注入）
 2. 朋友用：注入 loader 那一行（见上面「给朋友用」）
 3. 界面：右下角悬浮球 🚫 → 面板（拉黑/解除拉黑全在这里）
-4. 自测：`node tests/core.test.js`（核心逻辑 60 项）、浏览器打开 `tests/harness.html`（联调 54 项）、`tests/mail-fresh.html`（信箱边界 3 项）、`tests/official-mode.html`（官方形态 23 项）、`tests/migration.html`（老配置迁移 7 项）、`tests/loader-test.html`（loader 本地 6 项）与 `tests/loader-cdn.html`（loader 走 CDN = 朋友路径）
-   - **跑浏览器测试页前先把标签页切到前台**（`Page.bringToFront` / 点一下那个标签）。后台标签会被 Chrome 节流：定时器被拉长到分钟级，表现就是"测试页一直卡在跑测试中…"，`harness` 曾因此在 50/54 处停了好几分钟；切回前台后 20 秒内跑完。**不是卡死，也不是插件问题 —— 先看 `document.hidden`。**
+4. 自测：`node tests/core.test.js`（核心逻辑 63 项）、浏览器打开 `tests/harness.html`（联调 54 项）、`tests/mail-fresh.html`（信箱边界 3 项）、`tests/official-mode.html`（官方形态 23 项）、`tests/migration.html`（老配置迁移 7 项）、`tests/loader-test.html`（loader 本地 6 项）与 `tests/loader-cdn.html`（loader 走 CDN = 朋友路径）
+   - **推荐跑法：用 `file://` 在一个全新浏览器会话里打开**（例：`file:///D:/iirose-blacklist/tests/harness.html`）—— 实测 28 秒跑完、且不掉线。**别用 `http://127.0.0.1:端口` 长跑**：CDP 会话约 110 秒必断，守护进程随后会重建浏览器，跑到一半的结果连同页面一起没。harness 会把结果写进 localStorage 键 `bl_harness_result`，掉线后重开同源页面还能读回。
+   - **跑之前先确认标签页是前台**（`document.hidden` 应为 false，必要时 `Page.bringToFront`）。后台标签会被 Chrome 节流：定时器被拉长到分钟级，表现就是"测试页一直卡在跑测试中…"，`harness` 曾因此在 50/54 处停了好几分钟；切回前台后立刻跑完。**不是卡死，也不是插件问题 —— 先看 `document.hidden`。**
+   - 自建静态服务时注意**僵尸监听进程**：`:8098` 上曾同时挂着两个 pid，页面加载直接变 `chrome-error://`。先 `netstat -ano | grep :端口` 确认只有一个 LISTENING，再起服务。
    - `mail-fresh.html` 为什么单独一页：它测的是"面板**第一次**出现时"的时序（`#leaveMsgHolder` 整块插入 + 里面已经带着历史卡片），这个时序在 `harness.html` 里不可能复现（那边面板从页面加载时就在，标记早已置位）。
    - 两个 loader 测试页断言"拿到的版本 = 当前发布件版本"，期望值来自 `tests/expected-version.js`（由 `tools/publish.js` 生成，**别手改**，否则每次发版都得改测试）。
    - 注意：`official-mode.html` 里有一条断言是"官方形态下 localStorage 里不该有名单"。若在同一浏览器配置里先跑过 `harness.html`（它会往 localStorage 写名单），这条会假失败 —— 先 `localStorage.clear()` 再跑，或换无痕窗口。
@@ -219,9 +221,14 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 
 ## 版本
 
-**发布 tag**：`v0.2.0`（合规外壳）→ `v0.2.1`（loader v1）→ `v0.2.2`（loader v1.1 + vibecoding 署名）→ `v0.2.3`（loader v1.2 降级链 + 成本信息进文档）→ `v0.2.4`（插件 v0.2.1：拉黑即清历史 + 点播卡片）→ `v0.2.5`（插件 v0.2.2：老配置迁移，修"卡片清了、文字还在"）→ `v0.2.6`（插件 v0.2.4：拆掉右键/长按拉黑菜单，拉黑只走面板）→ **`v0.3.0`（插件 v0.3.0：屏蔽信箱通知）**。
+**发布 tag**：`v0.2.0`（合规外壳）→ `v0.2.1`（loader v1）→ `v0.2.2`（loader v1.1 + vibecoding 署名）→ `v0.2.3`（loader v1.2 降级链 + 成本信息进文档）→ `v0.2.4`（插件 v0.2.1：拉黑即清历史 + 点播卡片）→ `v0.2.5`（插件 v0.2.2：老配置迁移，修"卡片清了、文字还在"）→ `v0.2.6`（插件 v0.2.4：拆掉右键/长按拉黑菜单，拉黑只走面板）→ `v0.3.0`（插件 v0.3.0：屏蔽信箱通知）→ **`v0.3.1`（插件 v0.3.1：审查小问题 4 条全修）**。
 **只有插件本体（`src/`）改动才升 `VERSION` 与 `VERSION_CODE`**（官方规范要求 versionCode 每次发布 +1）；loader 与文档改动不动插件版本。
 
+- 插件 v0.3.1（2026-09-26，独立审查的「小问题」4 条全修）：不改行为口径，只补边界与持久化。
+  - **修**：① `counters.mail` 之前只在内存里（`normalizeStore` 只遍历默认键）→ 重启即清零；把 `mail: 0` 加进默认 counters，落盘与面板「清空统计」都认得它。② `mailRecordInfo(null)` / `mailHit(null, …)` 手调 `_diag` 时会抛 TypeError → 加空值 guard。③ `avatarKey` 不剥 `.svg/.avif/.ico`，与帧里的无扩展名形态判不等（漏拦方向）→ 扩展名白名单补齐。④ 版本 0.3.1 / versionCode 21。
+  - **回归**：核心 **63/63**（新增 3 项：空值 guard、扩展名白名单、`mail` 计数落盘 + 老落盘补 0）；联调 **54/54**（全量复跑，`file://` 新会话 28 秒跑完）；信箱边界页 3/3。
+  - **测试环境两条坑（今天各踩一次，已写进下面「自测」段）**：CDP 会话约 110 秒必断、且守护进程随后会重建浏览器，跑一半的结果全丢；**改用 `file://` + 全新浏览器会话后 28 秒跑完、不掉线 —— 这是本项目跑 harness 的推荐路径**。另外 `:8098` 上留过两个僵尸监听进程（`netstat -ano | grep :8098` 看到两个 pid），页面直接 `chrome-error://` 加载失败 —— 先清进程再起服务。
+  - harness 现在把结果写进 localStorage 键 `bl_harness_result`（掉线后重开同源页面还能读回）；探针 `docs/探针-信箱2.js` 升 **v3**：新增头像判据取证三项（指纹聚合看谁跟谁共用、同一名字跨帧的头像指纹是否一致、信箱卡片 DOM 头像 vs 名单）与一行入口 `__MAIL2__.avatars()`。
 - 插件 v0.3.0（2026-09-26，需求：北海）：**屏蔽信箱通知** —— 被拉黑者的点赞/关注/点踩/转账在侧栏「信箱」里的通知卡片不再出现。
   - **口径（北海拍板，逐条实现）**：① 点赞/关注/点踩**在协议层丢帧**（通知不到客户端 → 红点不亮）；② **转账只在界面层隐藏、绝不丢帧**（"钱优先"：丢帧会不会影响入账没验过，不拿钱冒险）；③ 站级**房间公告一律不动**；④ 判据是**名字或头像任一命中**（OR），**同名误伤接受**，不做严格模式、不加统计行；⑤ 历史卡片跟既有开关「拉黑时保留他的历史消息」走：关=新旧一起隐，开=只隐面板首批渲染之后新来的那条。
   - **为什么只能按名字/头像**：信箱帧（`@` 前缀）7 字段里**没有 uid**；真机探针取到的信箱条目 `onclick="getProfile([名字, 颜色, 头像, 性别, null])"` 第 5 位 uid 位就是 `null` —— 两条独立证据一致。

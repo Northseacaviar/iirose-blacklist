@@ -303,6 +303,104 @@
     return rec;
   }
 
+  // ---------- v3 新增：头像判据取证（回答三个问题，全部写进 json）----------
+  // ① 预置头像（如 cartoon/600264）是不是多人共用 → 共用即"撞车"，会误伤无关路人
+  // ② 同一个人的「房间帧头像」与「信箱帧头像」指纹是否相等 → 不等 = 头像这条路对信箱无效，只剩名字判据
+  // ③ 信箱卡片 DOM 里的头像 与 名单/最近出现里的头像指纹是否相等
+  function avatarKeyP(v) {                      // 与插件 avatarKey 同一套归一化（改了要同步）
+    var s = String(v == null ? '' : v).trim().toLowerCase();
+    if (!s) return '';
+    var cut = s.search(/[#?]/); if (cut >= 0) s = s.slice(0, cut);
+    s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, '');
+    var slash = s.lastIndexOf('/'); if (slash >= 0) s = s.slice(slash + 1);
+    return s.replace(/\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|ico)$/, '');
+  }
+  var AVATAR_HINT = /(\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|ico)(\b|$))|(^[a-z]+\/[0-9a-z_-]{3,}$)|(codemao\.cn)|(iirose\.com\/images\/icon)/i;
+  function looksAvatar(v) { return !!v && v.length > 3 && v.length < 200 && AVATAR_HINT.test(v); }
+
+  function readFullStore() {                    // 插件的 uids（已拉黑，含头像快照）+ seen（最近出现，含头像）
+    var out = { uids: {}, seen: {}, source: [] };
+    var frs = collect(window.top || window, 'top', [], 0);
+    for (var i = 0; i < frs.length; i++) {
+      var w = frs[i].w; if (!w) continue;
+      try {
+        var A = w.__IIROSE_BLACKLIST__;
+        if (A && A.store) {
+          if (A.store.uids) out.uids = A.store.uids;
+          if (A.store.seen) out.seen = A.store.seen;
+          out.source.push('插件@' + frs[i].path);
+        }
+      } catch (e) { }
+    }
+    return out;
+  }
+
+  function auditAvatars(full) {                 // 问题①：按头像指纹聚合，看谁跟谁共用
+    var byKey = {};
+    function put(key, uid, name, src) {
+      if (!key) return;
+      var it = byKey[key] || (byKey[key] = { key: key, uids: {}, names: {}, srcs: {} });
+      if (uid) it.uids[uid] = (it.uids[uid] || 0) + 1;
+      if (name) it.names[name] = (it.names[name] || 0) + 1;
+      it.srcs[src] = (it.srcs[src] || 0) + 1;
+    }
+    for (var u in full.uids) put(avatarKeyP(full.uids[u] && full.uids[u].avatar), u, full.uids[u] && full.uids[u].name, '拉黑名单');
+    for (var u2 in full.seen) put(avatarKeyP(full.seen[u2] && full.seen[u2].avatar), u2, full.seen[u2] && full.seen[u2].name, '最近出现');
+    var shared = [];
+    for (var k in byKey) {
+      var it2 = byKey[k];
+      if (Object.keys(it2.uids).length > 1 || Object.keys(it2.names).length > 1) shared.push(it2);
+    }
+    return { keys: Object.keys(byKey).length, sharedCount: shared.length, shared: shared.slice(0, 20), byKey: byKey };
+  }
+
+  function auditFrames() {                      // 问题②：同一个名字在各类帧里的头像指纹是否一致
+    var byName = {}, total = 0;
+    for (var i = 0; i < framesSeen.length; i++) {
+      var f = framesSeen[i];
+      var parts = String(f.s || '').slice(1).split('>');
+      for (var j = 0; j < parts.length; j++) {
+        if (!looksAvatar(parts[j])) continue;
+        total++;
+        var nm = String(parts[0] || '').slice(0, 40);
+        var e = byName[nm] || (byName[nm] = {});
+        var key = avatarKeyP(parts[j]);
+        (e[key] || (e[key] = [])).push(f.p + '@' + j + '=' + String(parts[j]).slice(0, 90));
+      }
+    }
+    var conflict = [];
+    for (var n2 in byName) if (Object.keys(byName[n2]).length > 1) conflict.push({ name: n2, keys: byName[n2] });
+    return { avatarFields: total, names: Object.keys(byName).length, conflictCount: conflict.length, conflict: conflict.slice(0, 20), byName: byName };
+  }
+
+  function auditMailCards() {                   // 问题③：信箱卡片 DOM 的头像 vs 帧/名单里的头像
+    var out = [];
+    var frs = collect(window.top || window, 'top', [], 0);
+    for (var i = 0; i < frs.length; i++) {
+      var w = frs[i].w; if (!w) continue;
+      var D, panel = null;
+      try { D = w.document; } catch (e) { continue; }
+      try { panel = D.getElementById('leaveMsgHolder'); } catch (e) { }
+      if (!panel) continue;
+      var cards; try { cards = panel.querySelectorAll('.cardTag'); } catch (e) { continue; }
+      for (var c = 0; c < cards.length && out.length < 40; c++) {
+        var card = cards[c], nm = '', raw = '';
+        try { var tn = card.querySelector('.cardTagName'); nm = tn ? String(tn.textContent || '').trim() : ''; } catch (e) { }
+        try { var im = card.querySelector('.cardTagAvatar img'); raw = im ? String(im.getAttribute('src') || '') : ''; } catch (e) { }
+        if (!raw) {
+          try {
+            var oc = card.querySelector('[onclick*="getProfile"]');
+            var m = oc ? String(oc.getAttribute('onclick') || '').match(/'[^']*'/g) : null;
+            if (m && m[2]) raw = m[2].replace(/'/g, '');
+          } catch (e) { }
+        }
+        var disp = ''; try { disp = w.getComputedStyle(card).display; } catch (e) { }
+        out.push({ name: nm, raw: String(raw).slice(0, 160), key: avatarKeyP(raw), display: disp, text: textOf(card).slice(0, 90) });
+      }
+    }
+    return out;
+  }
+
   function run(tag) {
     if (stopped) return;
     var now = Date.now();
@@ -318,6 +416,10 @@
       framesSeen: framesSeen.slice(-250), netLog: netLog.slice(-120),
       rawAdded: rawAdded.slice(-30), frames: []
     };
+    var full = readFullStore();
+    out.avatarAudit = auditAvatars(full);
+    out.frameAvatarAudit = auditFrames();
+    out.mailCards = auditMailCards();
     var lines = [];
     for (var i = 0; i < frs.length; i++) {
       try { var r = scanDoc(frs[i], st); out.frames.push(r); lines.push((r.path || '?') + ' 命中=' + ((r.records && r.records.length) || 0) + ' 容器=' + ((r.containers && r.containers.length) || 0) + ' plugin=' + (!!r.plugin) + ' ws=' + (r.wsStatus || '-') + ' ' + (r.url || r.crossOrigin || '')); }
@@ -325,6 +427,10 @@
     }
     console.log('【信箱探针v2】' + tag + ' —— 名单来源：' + st.source.join(',') + ' | 人数：' + Object.keys(st.uids).length + ' | 收包前缀：' + JSON.stringify(prefixCount));
     for (var l = 0; l < lines.length; l++) console.log('   ' + lines[l]);
+    console.log('【头像取证】指纹 ' + out.avatarAudit.keys + ' 个 · 疑似共用（>1 人/名）' + out.avatarAudit.sharedCount + ' 个 · 同名字多头像指纹 ' + out.frameAvatarAudit.conflictCount + ' 例 · 信箱卡片 ' + out.mailCards.length + ' 张 —— 细节在 json 里');
+    if (out.avatarAudit.sharedCount) console.log('  共用样例：' + JSON.stringify(out.avatarAudit.shared.slice(0, 5).map(function (x) { return { key: x.key, uids: Object.keys(x.uids), names: Object.keys(x.names) }; })));
+    if (out.frameAvatarAudit.conflictCount) console.log('  跨帧不一致样例：' + JSON.stringify(out.frameAvatarAudit.conflict.slice(0, 5)));
+    if (out.mailCards.length) console.log('  信箱卡片样例：' + JSON.stringify(out.mailCards.slice(0, 4)));
     saves++; lastSave = now;
     save(out, tag + saves);
   }
@@ -335,6 +441,7 @@
     frames: function () { return framesSeen.slice(-20); },
     added: function () { return rawAdded.slice(-10); },
     store: function () { return readStore(); },
+    avatars: function () { return { audit: auditAvatars(readFullStore()), frames: auditFrames(), cards: auditMailCards() }; },
     stop: function () { stopped = true; for (var i = 0; i < obsList.length; i++) { try { obsList[i].disconnect(); } catch (e) { } } console.log('【信箱探针v2】已停'); }
   };
 

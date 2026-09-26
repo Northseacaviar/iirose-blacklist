@@ -262,6 +262,31 @@ t('信箱·7 字段形状复核：性别/时间戳/颜色任一不合规都算"�
   eq(bad(6, 'd28ad'), null, '颜色 5 位');
   eq(JSON.stringify(bad(1, 'a.jpg')), JSON.stringify({ type: 'like', name: '甲', avatar: 'a.jpg', blockable: true }), '其它格不该被牵连');
 });
+t('信箱·手调 _diag 时传 null/undefined 不该抛（审查 C5）', () => {
+  eq(L.mailRecordInfo(null), null);
+  eq(L.mailRecordInfo(undefined), null);
+  eq(L.mailRecordInfo([]), null);
+  eq(L.mailRecordInfo(['粗', '略']), null);
+  eq(L.mailHit(null, '甲', 'a.jpg'), null);
+  eq(L.mailHit(undefined, '甲', 'a.jpg'), null);
+});
+t('头像指纹·.svg / .avif / .ico 也要剥掉（审查 C3：否则与帧里的无扩展名形态判不等）', () => {
+  eq(L.avatarKey('https://s.iirose.com/images/icon/cartoon/600264.svg'), '600264');
+  eq(L.avatarKey('cartoon/600264'), '600264');
+  eq(L.avatarKey('a/600264.JPG'), '600264');
+  eq(L.avatarKey('https://x/y/600264.avif'), L.avatarKey('cartoon/600264'));
+  eq(L.avatarKey(''), '');
+  eq(L.avatarKey(null), '');
+});
+t('统计·mail 计数能落盘、清空统计也认得它（审查 C2：原来只在内存里，重启清零）', () => {
+  const d = L.defaultStore();
+  ok('mail' in d.counters, '默认 counters 里没有 mail 键 → 永远落不了盘');
+  const norm = L.normalizeStore({ counters: { room: 3, mail: 7, dom: 2 } });
+  eq(norm.counters.mail, 7);
+  eq(norm.counters.room, 3);
+  eq(norm.counters.dom, 2);
+  eq(L.normalizeStore({}).counters.mail, 0, '老落盘（没有 mail 键）要补 0 而不是 undefined');
+});
 t('onSeen 带出头像链接（信箱只能按名字/头像认人，拉黑时要快照这份）', () => {
   const got = [];
   L.filterFrame(F.room3, storeMail([]), { onSeen: (uid, name, kind, avatar) => got.push([uid, name, kind, avatar]) });
