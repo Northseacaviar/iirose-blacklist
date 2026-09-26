@@ -9,6 +9,10 @@
 <div id="box">跑测试中…</div>
 <!-- 故意先不给信箱面板：下面用脚本整块插入，复现"面板第一次出现就带着历史卡片"这个时序 -->
 <div id="msgholder"><div class="msgholderBox" id="msgHolder"></div></div>
+<!-- E4 用：一块空面板，用例里再挂上去（复现"面板早就在、只是空着"的时序） -->
+<div id="keepAliveHolderShell" style="display:none">
+  <div id="keepAliveHolder" class="panelHolderItem"><div class="contentItemContent"></div></div>
+</div>
 <pre id="out"></pre>
 
 <script>
@@ -102,6 +106,29 @@ const rowOf = (id) => document.getElementById(id);
     eq(holder2.querySelector('.cardTag').style.display, 'none', '名字命中却没隐');
     holder.parentNode.removeChild(holder);
     holder2.parentNode.removeChild(holder2);
+    A.unblock(BLOCK);
+    await sleep(200);
+  });
+
+  // ---- E4：面板早就在 DOM 里、只是空着 —— 被拉黑者的**第一条**通知（面板里新 append 的卡片）
+  //        必须隐掉（北海 2026-09-26 真机反馈：保留历史开着时，这条被当"面板首批历史"留了下来）----
+  await t('E4 面板早存在且空：保留历史开着 → 新推来的第一张被拉黑者卡片仍要隐', async () => {
+    A.setKeepHistory(true);
+    const holder = document.getElementById('keepAliveHolder');
+    holder.id = 'leaveMsgHolder';                // 挂上去时才是"信箱面板"（用例骨架里用别的 id，免得干扰其它用例）
+    document.body.appendChild(holder);           // 面板先出现（里面空着），观察者此时扫到 0 张卡片
+    await sleep(400);
+    A.block(BLOCK, NAME);
+    await sleep(300);
+    A.setKeepHistory(true);                      // 复核开关真的开着（避免前面用例的落盘覆盖）
+    const card = document.createElement('div');
+    card.className = 'cardTag';
+    card.id = 'e4card';
+    card.innerHTML = cardHtml(NAME, 'https://s.iirose.com/images/icon/cartoon/900001.jpg');
+    holder.querySelector('.contentItemContent').appendChild(card);   // 站点把新通知 append 进已有面板
+    await sleep(500);
+    eq(card.style.display, 'none', '面板空着时被拉黑者的第一条通知没隐 —— 会被当成"面板首批历史"（北海真机反馈的正是这条）');
+    holder.parentNode.removeChild(holder);
     A.unblock(BLOCK);
     await sleep(200);
   });

@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.2';
-  const VERSION_CODE = 22;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.3';
+  const VERSION_CODE = 23;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -648,20 +648,34 @@
     return rows;
   }
 
+  // 这一批新增节点里是否"带着面板本身"（站点把 #leaveMsgHolder 整块建出来/重建出来）
+  function bringsPanelItself(scope) {
+    if (!scope || scope.nodeType !== 1) return false;
+    try {
+      if (scope.matches && scope.matches('#' + MAIL_PANEL_ID)) return true;
+      if (scope.querySelector && scope.querySelector('#' + MAIL_PANEL_ID)) return true;
+    } catch (e) { noteError('信箱面板判定', e); }
+    return false;
+  }
+
   // incremental=true 表示"这是刚渲染出来的卡片"；false 表示整体扫（启动/拉黑/定时/开关变化）
   function sweepMailCards(scope, incremental) {
     const rows = mailCardRows(scope);
-    // 面板第一次出现时，这一批卡片一律算"历史"（审查 D6 实测：面板整体插入时若按增量处理，
-    // 「保留历史」开着也会把面板里原有的历史卡片隐掉）
-    const firstRender = rows.length > 0 && !mailPanelSeen;
-    if (firstRender) mailPanelSeen = true;
+    // 什么时候算"历史批次"（「保留历史」开着时留着不动）：
+    //   ① 非增量（启动/定时/拉黑后的全扫）→ 页面上既有的这批就是历史；
+    //   ② 增量，但新增的子树**带着面板本身**（审查 D6：站点把面板整块插入，里面本就带着历史卡片）。
+    // 反面：面板早就在 DOM 里、只是往里 append 了一张卡片 = 站点新推来的通知 → 必须按"新"处理。
+    // （2026-09-26 北海真机反馈：面板空着时，被拉黑者的第一条通知被当历史留了下来 —— 就是漏在这个反面。）
+    const panelBuilt = incremental && bringsPanelItself(scope);
+    const historyBatch = !incremental || panelBuilt;
+    if (rows.length > 0) mailPanelSeen = true;
     let n = 0;
     const keep = store.conf.keepHistory !== false;
     rows.forEach((row) => {
       const parts = mailCardParts(row);
       const hit = store.enabled ? mailHit(store, parts.name) : null;
       if (!hit) { showMailCard(row); return; }                  // 解除拉黑 / 关掉屏蔽：还原
-      if (keep && (!incremental || firstRender)) return;         // 「保留历史」开着：已有卡片（含首批整批渲染）不动
+      if (keep && historyBatch) return;                          // 「保留历史」开着：历史批次不动
       n += hideMailCard(row);
     });
     if (n) { addCounter('dom', n); saveStore(); if (ui && ui.refreshStats) ui.refreshStats(); }

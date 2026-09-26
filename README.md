@@ -164,7 +164,8 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
    （`extJs` 支持空格分隔多个地址，可与点歌插件同时注入）
 2. 朋友用：注入 loader 那一行（见上面「给朋友用」）
 3. 界面：右下角悬浮球 🚫 → 面板（拉黑/解除拉黑全在这里）
-4. 自测：`node tests/core.test.js`（核心逻辑 56 项）、浏览器打开 `tests/harness.html`（联调 54 项）、`tests/mail-fresh.html`（信箱边界 3 项）、`tests/official-mode.html`（官方形态 23 项）、`tests/migration.html`（老配置迁移 7 项）、`tests/loader-test.html`（loader 本地 6 项）与 `tests/loader-cdn.html`（loader 走 CDN = 朋友路径）
+4. 自测：`node tests/core.test.js`（核心逻辑 56 项）、浏览器打开 `tests/harness.html`（联调 54 项）、`tests/mail-fresh.html`（信箱边界 4 项）、`tests/official-mode.html`（官方形态 23 项）、`tests/migration.html`（老配置迁移 7 项）、`tests/loader-test.html`（loader 本地 6 项）与 `tests/loader-cdn.html`（loader 走 CDN = 朋友路径）
+5. **发版最后一步（新增，别漏）：`node tools/purge-cdn.js`** —— 清 jsdelivr 的 `@main`／无 ref 缓存并逐主机复核版本，落后就退出码 1。**不跑它，用户那边可能继续拿旧版最多 12 小时**（v0.3.0~v0.3.2 三次发版就是这么白白没送达的；见「版本」段 v0.3.3 的真因一）。
    - **推荐跑法：用 `file://` 在一个全新浏览器会话里打开**（例：`file:///D:/iirose-blacklist/tests/harness.html`）—— 实测 28 秒跑完、且不掉线。**别用 `http://127.0.0.1:端口` 长跑**：CDP 会话约 110 秒必断，守护进程随后会重建浏览器，跑到一半的结果连同页面一起没。harness 会把结果写进 localStorage 键 `bl_harness_result`，掉线后重开同源页面还能读回。
    - **跑之前先确认标签页是前台**（`document.hidden` 应为 false，必要时 `Page.bringToFront`）。后台标签会被 Chrome 节流：定时器被拉长到分钟级，表现就是"测试页一直卡在跑测试中…"，`harness` 曾因此在 50/54 处停了好几分钟；切回前台后立刻跑完。**不是卡死，也不是插件问题 —— 先看 `document.hidden`。**
    - 自建静态服务时注意**僵尸监听进程**：`:8098` 上曾同时挂着两个 pid，页面加载直接变 `chrome-error://`。先 `netstat -ano | grep :端口` 确认只有一个 LISTENING，再起服务。
@@ -221,8 +222,16 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 
 ## 版本
 
-**发布 tag**：`v0.2.0`（合规外壳）→ `v0.2.1`（loader v1）→ `v0.2.2`（loader v1.1 + vibecoding 署名）→ `v0.2.3`（loader v1.2 降级链 + 成本信息进文档）→ `v0.2.4`（插件 v0.2.1：拉黑即清历史 + 点播卡片）→ `v0.2.5`（插件 v0.2.2：老配置迁移，修"卡片清了、文字还在"）→ `v0.2.6`（插件 v0.2.4：拆掉右键/长按拉黑菜单，拉黑只走面板）→ `v0.3.0`（插件 v0.3.0：屏蔽信箱通知）→ `v0.3.1`（插件 v0.3.1：审查小问题 4 条全修）→ **`v0.3.2`（插件 v0.3.2：判据改为只按名字，头像判据整块移除）**。
+**发布 tag**：`v0.2.0`（合规外壳）→ `v0.2.1`（loader v1）→ `v0.2.2`（loader v1.1 + vibecoding 署名）→ `v0.2.3`（loader v1.2 降级链 + 成本信息进文档）→ `v0.2.4`（插件 v0.2.1：拉黑即清历史 + 点播卡片）→ `v0.2.5`（插件 v0.2.2：老配置迁移，修"卡片清了、文字还在"）→ `v0.2.6`（插件 v0.2.4：拆掉右键/长按拉黑菜单，拉黑只走面板）→ `v0.3.0`（插件 v0.3.0：屏蔽信箱通知）→ `v0.3.1`（插件 v0.3.1：审查小问题 4 条全修）→ `v0.3.2`（插件 v0.3.2：判据改为只按名字，头像判据整块移除）→ **`v0.3.3`（插件 v0.3.3：修「面板空着时第一条通知不隐」+ 发版流程补 CDN 清缓存）**。
 **只有插件本体（`src/`）改动才升 `VERSION` 与 `VERSION_CODE`**（官方规范要求 versionCode 每次发布 +1）；loader 与文档改动不动插件版本。
+
+- 插件 v0.3.3（2026-09-26，北海真机反馈「拉黑用户的信箱消息还是提示了」）：
+  - **真因一（交付链，非代码）：CDN 把旧版发回来了**。jsdelivr 对**分支引用** `@main` 的缓存是 `s-maxage=43200`（12 小时），loader 那个 `?t=时间戳` 只能绕开**浏览器**缓存，CDN 忽略查询串。实测 `cdn.jsdelivr.net` 的 `@main` 与 tag `v0.2.6` 的发布件 **md5 完全相同**（`c835ab60…`，即插件 v0.2.4）—— 北海的面板标题一直写着 `v0.2.4`，v0.3.x 的信箱代码**从未在他页面上跑过**。gcore 的 `@main` 同样陈旧（且 purge 接口管不到它，providers 只报 CF + FY）。
+    - **修**：新增 `tools/purge-cdn.js`（清 `@main`／无 ref 的插件与 loader 四个地址 → 逐主机复核版本，落后即退出码 1），**发版流程的最后一步现在是跑它**；loader 对 gcore 把「无 ref = tag 快照」排到 `@main` 前面。
+  - **真因二（代码）：面板空着时，被拉黑者的第一条通知被当成"历史"留了下来**。旧逻辑把"面板第一次扫到卡片"一律当历史批次（审查 D6），于是：页面加载时信箱里一张卡都没有（`mailPanelSeen` 仍为 false）→ 被拉黑者推来一条转账通知 → 判定为"首批渲染" → 开着「保留历史」就留着不隐。北海的截图正是这个形状。
+    - **改法**：判"历史批次"不再看"第几次扫到卡片"，而是看**新增的子树里是否带着面板本体**（`bringsPanelItself()`）—— 站点把 `#leaveMsgHolder` 整块建出来/重建出来（D6 那种）算历史；面板早就在 DOM 里、只是往里 append 一张卡 = 站点新推来的通知，按"新"处理。
+    - **回归**：`mail-fresh.html` **4/4**（新增 E4：面板早存在且空、保留历史开着 → 新推来的第一张被拉黑者卡片仍要隐；E1 继续守 D6：面板整块插入带着的历史卡片要留着）；核心 **56/56**；联调 **54/54**；迁移 **7/7**。
+  - **仍未真机复验**：`@` 帧的字段形状依旧只有官方文档样本 + Koishi 适配器两处依据（见「真机待验证项」第 3 条）。这次修的两种情况都用真机取到的 DOM（`#leaveMsgHolder` / `.cardTag` / `.cardTagName` / `history=""` 属性）在本地页复现，不是凭空推的。
 
 - 插件 v0.3.2（2026-09-26，北海拍板）：**判据改为只按名字，头像判据整块移除**。
   - **为什么**：独立审查用官方样本实测出「房间帧头像 = `static.codemao.cn/…bmp`、信箱帧头像 = `cartoon/600264`，归一后不相等」，也就是说按头像认人这条路对信箱未必成立；更危险的是站点预置卡通头像（六位数字 id）可能多用户共用 —— 按头像命中会**误伤无关路人**。北海拍板：只为名字判定，宁可漏拦，不误伤。

@@ -36,6 +36,9 @@
 
   var MAIN = 'iirose-blacklist.js';
   var FALLBACK_HOSTS = ['fastly.jsdelivr.net', 'gcore.jsdelivr.net'];
+  // gcore 那份 @main 缓存 purge 接口管不到（providers 只报 CF + FY，实测 gcore 的 @main 长期停在旧版，
+  // 而它的「无 ref = tag 快照」是新的）—— 对 gcore 就把 tag 快照排在 @main 前面。
+  var GCORE = 'gcore.jsdelivr.net';
 
   function selfUrl() {
     var s = document.currentScript;
@@ -75,7 +78,9 @@
     if (host) {
       FALLBACK_HOSTS.forEach(function (h) {
         if (h !== host[1]) {
-          mainCandidates.forEach(function (u) {
+          var forms = mainCandidates.slice();
+          if (h === GCORE) forms.reverse();          // gcore：tag 快照优先（它的 @main 缓存是旧的）
+          forms.forEach(function (u) {
             list.push(u.replace(/^https?:\/\/[^/]+\//, location.protocol + '//' + h + '/'));
           });
         }
