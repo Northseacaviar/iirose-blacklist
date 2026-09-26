@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.2.4';
-  const VERSION_CODE = 19;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.0';
+  const VERSION_CODE = 20;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -127,12 +127,12 @@
     for (const k in (raw.uids || {})) {
       if (!k) continue;
       const it = raw.uids[k] || {};
-      s.uids[k] = { name: it.name ? String(it.name) : '', ts: Number(it.ts) || Date.now() };
+      s.uids[k] = { name: it.name ? String(it.name) : '', ts: Number(it.ts) || Date.now(), avatar: it.avatar ? String(it.avatar) : '' };
     }
     for (const k in (raw.seen || {})) {
       if (!k) continue;
       const it = raw.seen[k] || {};
-      s.seen[k] = { name: it.name ? String(it.name) : '', ts: Number(it.ts) || 0 };
+      s.seen[k] = { name: it.name ? String(it.name) : '', ts: Number(it.ts) || 0, avatar: it.avatar ? String(it.avatar) : '' };
     }
     for (const k in s.counters) if (typeof raw.counters?.[k] === 'number') s.counters[k] = raw.counters[k];
     if (raw.conf && typeof raw.conf === 'object') {
@@ -174,10 +174,16 @@
       .replace(/&#39;/g, "'").replace(/&amp;/g, '&');
   }
 
-  function recordSeen(store, uid, name) {
+  function recordSeen(store, uid, name, avatar) {
     if (!uid) return;
     const old = store.seen[uid];
-    store.seen[uid] = { name: name || (old && old.name) || '', ts: Date.now() };
+    store.seen[uid] = {
+      name: name || (old && old.name) || '',
+      ts: Date.now(),
+      // 头像链接一并记下：信箱（@ 帧）里没有 uid，只能按 名字/头像 认人，
+      // 拉黑时从这里快照一份到名单里（见 block）。没头像时不覆盖已有的（帧里偶尔会缺）。
+      avatar: avatar ? String(avatar) : ((old && old.avatar) || ''),
+    };
     const keys = Object.keys(store.seen);
     if (keys.length > MAX_SEEN) {
       keys.sort((a, b) => (store.seen[a].ts || 0) - (store.seen[b].ts || 0));
@@ -218,12 +224,14 @@
     const out = { data: data, changed: false, blocked: [], kind: null, abnormal: false };
     if (typeof data !== 'string' || data.length < 2) return out;
 
-    let head, kind, uidIdx, nameIdx, multi = true;
+    let head, kind, uidIdx, nameIdx, avatarIdx, multi = true;
     if (data.charCodeAt(0) === 0x22) {            // "
-      if (data.charCodeAt(1) === 0x22) { head = '""'; kind = 'priv'; uidIdx = 1; nameIdx = 2; }
-      else { head = '"'; kind = 'room'; uidIdx = 8; nameIdx = 2; }
+      if (data.charCodeAt(1) === 0x22) { head = '""'; kind = 'priv'; uidIdx = 1; nameIdx = 2; avatarIdx = 3; }
+      else { head = '"'; kind = 'room'; uidIdx = 8; nameIdx = 2; avatarIdx = 1; }
     } else if (data.charCodeAt(0) === 0x3d) {     // =
-      head = '='; kind = 'danmaku'; uidIdx = 7; nameIdx = 0; multi = false;
+      head = '='; kind = 'danmaku'; uidIdx = 7; nameIdx = 0; avatarIdx = 5; multi = false;
+    } else if (data.charCodeAt(0) === 0x40) {     // @ 信箱/通知帧（见 filterMailFrame）
+      return filterMailFrame(data, store, hooks, out);
     } else {
       return out;                                 // 快照 / 媒体事件 / 其它帧：原样透传
     }
@@ -240,7 +248,7 @@
       const uid = f[uidIdx];
       if (looksLikeUid(uid)) {
         const name = unescapeHtml(f[nameIdx]);
-        if (hooks && hooks.onSeen) hooks.onSeen(uid, name, kind);
+        if (hooks && hooks.onSeen) hooks.onSeen(uid, name, kind, f[avatarIdx]);
         if (store.enabled && isBlockedIn(store, uid)) {
           out.blocked.push({ uid: uid, name: name, kind: kind });
           if (hooks && hooks.onBlock) hooks.onBlock(uid, kind);
@@ -280,6 +288,92 @@
       if (looksLikeUid(t) && isBlockedIn(store, t)) return t;
     }
     return null;
+  }
+
+  /* ------------------------------------------------------------------
+   * 信箱（通知）帧：前缀 '@'，第 2 个字符是子类型，记录以 '<' 分、字段以 '>' 分。
+   * 形状（两个独立来源一致：官方 events 文档样本 + Koishi 适配器 mailbox 解码器）：
+   *   3 字段 = 房间公告（站级通知，不带人名）——【一律不动】
+   *   7 字段 = 用户名>头像>性别>标记(+附言)>背景>时间>颜色，标记：
+   *            '^ 关注 / '*' 点赞 / 'h 点踩 / '$ 转账（打赏）
+   * 关键限制（2026-09-26 真机探针 blk-mail2-* 实测）：信箱条目里【没有 uid】——
+   *   帧只有 用户名+头像链接，界面卡的 onclick 也是 getProfile(['名','色','头像','性别',null])，uid 位是 null。
+   *   所以只能按 名字/头像 认人；北海 2026-09-26 拍板接受同名误伤，不做兜底开关。
+   * 丢帧范围（北海 2026-09-26 拍板）：只丢「形状完全认得出、且命中名单」的记录；
+   *   转账（'$'）永远不丢 —— 钱优先（丢帧会不会影响入账未经验证，通知只在界面层隐藏）。
+   *   认不出的记录一律原样保留：零影响优先。
+   * ------------------------------------------------------------------ */
+  const MAIL_TYPE_BY_MARK = { '^': 'follower', '*': 'like', 'h': 'dislike', '$': 'payment' };
+
+  // 解析一条信箱记录；null = 形状不认识（残片/未知类型），调用方必须原样放行
+  function mailRecordInfo(f) {
+    if (f.length === 3) return { type: 'notice', name: '', avatar: '', blockable: false };
+    if (f.length !== 7) return null;
+    const marker = String(f[3] || '');
+    if (marker.charAt(0) !== "'") return null;
+    const type = MAIL_TYPE_BY_MARK[marker.charAt(1)];
+    if (!type) return null;
+    // 形状复核（2026-09-26 独立审查 B4 的实测：房间公告文本里含 '>' 时会被切成 7 段、误判成通知记录，
+    // 进而可能命中名单把整条公告丢掉 —— 违反"站级公告一律不动"）。
+    // 真实通知里这三格是稳定的：性别 1~3、时间戳 10 位数字、颜色 6 位 hex；公告文本撑不出整套形状。
+    // 代价：站点若改这三格的含义，会变成"漏拦"而不是"误伤" —— 宁可漏，不误伤（北海零误伤红线）。
+    if (!/^[1-3]$/.test(String(f[2] || ''))) return null;
+    if (!/^\d{9,11}$/.test(String(f[5] || ''))) return null;
+    if (!/^[0-9a-fA-F]{6}$/.test(String(f[6] || ''))) return null;
+    return { type: type, name: f[0] || '', avatar: f[1] || '', blockable: type !== 'payment' };
+  }
+
+  // 头像指纹：同一个人的头像在两种地方形态不同 ——
+  //   帧里可能是 'cartoon/600264'，DOM 里是 'https://s.iirose.com/images/icon/cartoon/600264.jpg'；
+  // 统一成"末段去扩展名"（600264 / 5512-G6）后跨形态可比，撞车概率极低（站点文件名含随机段）。
+  // 名字比头像稳（换头像不改名），头像比名字稳（改名不改头像）——两个任一命中即算命中（OR）。
+  function avatarKey(v) {
+    let s = String(v == null ? '' : v).trim().toLowerCase();
+    if (!s) return '';
+    const cut = s.search(/[#?]/);
+    if (cut >= 0) s = s.slice(0, cut);
+    s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, '');          // 去协议与域名
+    const slash = s.lastIndexOf('/');
+    if (slash >= 0) s = s.slice(slash + 1);                // 只留最后一段
+    return s.replace(/\.(jpg|jpeg|png|gif|webp|bmp)$/, ''); // 去扩展名
+  }
+
+  // 命中黑名单？名字（trim + 小写完全相等）或头像指纹任一命中即算
+  function mailHit(store, name, avatar) {
+    const nm = String(name == null ? '' : name).trim().toLowerCase();
+    const ak = avatarKey(avatar);
+    if (!nm && !ak) return null;
+    for (const uid in store.uids) {
+      const it = store.uids[uid] || {};
+      const bn = String(it.name || '').trim().toLowerCase();
+      if (nm && bn && nm === bn) return { uid: uid, by: 'name' };
+      if (ak && it.avatar && avatarKey(it.avatar) === ak) return { uid: uid, by: 'avatar' };
+    }
+    return null;
+  }
+
+  // '@' 帧的过滤：逐记录判定，只丢命中的那条；全部丢完才整帧丢弃
+  function filterMailFrame(data, store, hooks, out) {
+    const prefix = data.slice(0, 2);            // '@' + 子类型字符（官方样本为 '@*'）
+    const recs = data.slice(2).split('<');
+    const kept = [];
+    for (let i = 0; i < recs.length; i++) {
+      const rec = recs[i];
+      const info = mailRecordInfo(rec.split('>'));
+      if (!info || !info.blockable || !store.enabled) { kept.push(rec); continue; }
+      const name = unescapeHtml(info.name);
+      const hit = mailHit(store, name, info.avatar);
+      if (!hit) { kept.push(rec); continue; }
+      out.kind = 'mail';
+      out.blocked.push({ uid: hit.uid, name: name, kind: 'mail', type: info.type });
+      if (hooks && hooks.onBlock) hooks.onBlock(hit.uid, 'mail');
+      // 丢掉这条记录（不 push）
+    }
+    if (out.blocked.length) {
+      out.changed = true;
+      out.data = kept.some(r => r.length) ? (prefix + kept.join('<')) : null;
+    }
+    return out;
   }
 
   // 面板里按名字找 uid：优先最近出现、完全匹配的
@@ -377,17 +471,18 @@
     if (kind === 'room') store.counters.room++;
     else if (kind === 'priv') store.counters.priv++;
     else if (kind === 'danmaku') store.counters.danmaku++;
+    else if (kind === 'mail') store.counters.mail = (store.counters.mail || 0) + 1;   // 面板不显示（北海 2026-09-26：不加统计行），调试日志里能看
     saveStore();
     if (store.conf.debug) log('已屏蔽', kind, uid, '累计', JSON.stringify(store.counters));
     if (ui && ui.refreshStats) ui.refreshStats();
   }
 
   const hookCbs = {
-    onSeen: (uid, name, kind) => {
+    onSeen: (uid, name, kind, avatar) => {
       if (myUid() && uid === myUid()) return;               // 自己不进"最近出现"
       const old = store.seen[uid];
       if (old && old.name === name && Date.now() - (old.ts || 0) < 30000) return; // 降噪
-      recordSeen(store, uid, name);
+      recordSeen(store, uid, name, avatar);
       saveStore();
       if (ui && ui.refreshSeen) ui.refreshSeen();
     },
@@ -510,6 +605,101 @@
     return node;
   }
 
+  /* ------------------------------------------------------------------
+   * 信箱卡片：侧栏「信箱」面板 = #leaveMsgHolder，条目 = .cardTag
+   * 真机实测结构（2026-09-26 探针 blk-mail2-*）：
+   *   <div class="cardTag">
+   *     <div class="cardTagBg mdi-image-outline"><div class="cardTagNew">（未读小红点）
+   *     <div class="cardTagI">
+   *       <div class="cardTagAvatar whoisTouch2" onclick="getProfile(['名字','颜色','头像URL','性别',null])">
+   *       <div class="cardTagName textColor">名字</div>
+   * 条目里【没有 uid】（onclick 的 uid 位是 null），所以只能按 名字/头像 认人 —— 与协议侧同一套判据。
+   * 处理方式：display:none 隐藏（跟私聊会话项一致：可恢复、不删节点，站点结构不受影响）。
+   * 「拉黑时保留他的历史消息」开着时：只隐"面板渲染完之后新来的那条"，已经渲染出来的卡片算历史、留着；
+   * 关着时（默认）：全部隐。- 
+   * ------------------------------------------------------------------ */
+  const MAIL_PANEL_ID = 'leaveMsgHolder';
+  const MAIL_CARD_SEL = '.cardTag';
+  let mailPanelSeen = false;      // 面板出现过一次之后，新插入的卡片才算"新"（见 sweepMailCards）
+
+  function mailCardParts(row) {
+    let name = '', avatar = '';
+    try {
+      const nameEl = row.querySelector ? row.querySelector('.cardTagName') : null;
+      if (nameEl) name = String(nameEl.textContent || '').trim();
+      const img = row.querySelector ? row.querySelector('.cardTagAvatar img') : null;
+      if (img && img.getAttribute) avatar = img.getAttribute('src') || '';
+      if (!avatar) {   // 图片还没加载完：退回 onclick 的参数（getProfile(['名','色','头像','性别',null])）
+        const oc = row.querySelector ? row.querySelector('[onclick*="getProfile"]') : null;
+        const raw = oc && oc.getAttribute ? String(oc.getAttribute('onclick') || '') : '';
+        const m = raw.match(/getProfile\s*\(\s*\[([\s\S]*?)\]/);
+        if (m) {
+          // 只取"引号里"的参数：名字里可能带逗号（审查 D7 实测 '甲,乙' 会把 split(',') 切错，头像位取成颜色位）
+          const parts = [];
+          const re = /'([^']*)'|"([^"]*)"/g;
+          let mm;
+          while ((mm = re.exec(m[1])) !== null) parts.push(mm[1] !== undefined ? mm[1] : mm[2]);
+          if (parts.length >= 3) avatar = String(parts[2]).trim();
+          if (!name && parts.length >= 1) name = String(parts[0]).trim();   // 站点没渲染 .cardTagName 时兜底
+        }
+      }
+    } catch (e) { noteError('信箱条目解析', e); }
+    return { name: name, avatar: avatar };
+  }
+
+  function hideMailCard(row) {
+    const marked = row.hasAttribute('data-bl-mail-hidden');
+    if (!marked) row.setAttribute('data-bl-mail-prev-display', row.style.display || '');   // 只在第一次记原值
+    if (marked && row.style.display === 'none') return 0;      // 已经隐好了：不重复计数
+    row.setAttribute('data-bl-mail-hidden', '1');
+    // 站点重渲染会把 display 改回可见（审查 D3 实测：标记还在、卡却露出来了）—— 这里每次扫都按回去
+    row.style.display = 'none';
+    return marked ? 0 : 1;
+  }
+
+  function showMailCard(row) {
+    if (!row.hasAttribute('data-bl-mail-hidden')) return 0;
+    row.style.display = row.getAttribute('data-bl-mail-prev-display') || '';
+    row.removeAttribute('data-bl-mail-prev-display');
+    row.removeAttribute('data-bl-mail-hidden');
+    return 1;
+  }
+
+  // 取作用域内的信箱卡片：全扫时扫整个文档，增量时只看新插入的子树
+  function mailCardRows(scope) {
+    const rows = [];
+    try {
+      if (scope && scope.matches && scope.matches(MAIL_CARD_SEL)) rows.push(scope);
+      const found = (scope || document).querySelectorAll ? (scope || document).querySelectorAll(MAIL_CARD_SEL) : [];
+      Array.prototype.forEach.call(found, (n) => {
+        if (rows.indexOf(n) >= 0) return;
+        if (!n.closest || !n.closest('#' + MAIL_PANEL_ID)) return;   // 只认信箱面板里的卡片，别的地方同名 class 不动
+        rows.push(n);
+      });
+    } catch (e) { noteError('信箱卡片查询', e); }
+    return rows;
+  }
+
+  // incremental=true 表示"这是刚渲染出来的卡片"；false 表示整体扫（启动/拉黑/定时/开关变化）
+  function sweepMailCards(scope, incremental) {
+    const rows = mailCardRows(scope);
+    // 面板第一次出现时，这一批卡片一律算"历史"（审查 D6 实测：面板整体插入时若按增量处理，
+    // 「保留历史」开着也会把面板里原有的历史卡片隐掉）
+    const firstRender = rows.length > 0 && !mailPanelSeen;
+    if (firstRender) mailPanelSeen = true;
+    let n = 0;
+    const keep = store.conf.keepHistory !== false;
+    rows.forEach((row) => {
+      const parts = mailCardParts(row);
+      const hit = store.enabled ? mailHit(store, parts.name, parts.avatar) : null;
+      if (!hit) { showMailCard(row); return; }                  // 解除拉黑 / 关掉屏蔽：还原
+      if (keep && (!incremental || firstRender)) return;         // 「保留历史」开着：已有卡片（含首批整批渲染）不动
+      n += hideMailCard(row);
+    });
+    if (n) { addCounter('dom', n); saveStore(); if (ui && ui.refreshStats) ui.refreshStats(); }
+    return n;
+  }
+
   function hideSessionNodes(scope) {
     let list;
     try { list = (scope || document).querySelectorAll('[ip]'); } catch (e) { noteError('会话项查询', e); return; }
@@ -588,9 +778,11 @@
 
   function sweepAll() {
     const removed = sweepMessages();
+    let mail = 0;
+    try { mail = sweepMailCards(null, false); } catch (e) { noteError('信箱卡片清扫', e); }
     try { hideSessionNodes(); } catch (e) { noteError('会话项清扫', e); }
-    if (removed) log('清扫历史消息', removed, '条');
-    return removed;
+    if (removed || mail) log('清扫历史消息', removed, '条', mail ? ('+ 信箱卡片 ' + mail + ' 条') : '');
+    return removed + mail;
   }
 
   // 会话项扫描按 500ms 节流；消息清扫在观察者里按节点就地做，不整体重扫
@@ -621,6 +813,8 @@
             const n = added[j];
             if (n.nodeType !== 1) continue;
             if (inMsgBox(n)) sweepNode(n);                       // 消息区：就地处理（含整批插入）
+            // 信箱面板/卡片：新插入的卡片要看它自己是不是 .cardTag（querySelector 不匹配自身）
+            if (n.id === MAIL_PANEL_ID || (n.matches && n.matches(MAIL_CARD_SEL)) || !!(n.querySelector && n.querySelector(MAIL_CARD_SEL))) sweepMailCards(n, true);
             if (n.getAttribute && n.getAttribute('ip')) sawIp = true;
             else if (n.querySelector && n.querySelector('[ip]')) sawIp = true;
           }
@@ -966,7 +1160,8 @@
       store.enabled = on; saveStore();
       log('屏蔽开关', on);
       setStatus(on ? '已开启屏蔽' : '已关闭屏蔽（名单保留）', on ? '#68b26d' : '#d0a04a');
-      setTimeout(() => { if (store.enabled) sweepAll(); }, 50);
+      // 信箱卡片是"隐藏"不是"删除"：关掉屏蔽时还原回去（聊天区已清掉的行没法回来，这里能）
+      setTimeout(() => { if (store.enabled) sweepAll(); else sweepMailCards(null, false); }, 50);
     });
     const debugToggle = toggleRow('debug', '调试日志', !!store.conf.debug, (on) => {
       store.conf.debug = on; saveStore(); log('调试日志', on);
@@ -1248,7 +1443,12 @@
     if (!looksLikeUid(uid)) { statusMsg('不是有效的 uid：' + uid, '#ec4141'); return; }
     if (myUid() && uid === myUid()) { statusMsg('不能拉黑自己', '#ec4141'); return; }
     if (isBlocked(uid)) { statusMsg('已在名单中', '#d0a04a'); return; }
-    store.uids[uid] = { name: name || (store.seen[uid] || {}).name || '', ts: Date.now() };
+    store.uids[uid] = {
+      name: name || (store.seen[uid] || {}).name || '',
+      ts: Date.now(),
+      // 头像一并快照：信箱（@ 帧）里没有 uid，只能靠 名字/头像 认人（见 mailHit / sweepMailCards）
+      avatar: (store.seen[uid] || {}).avatar || '',
+    };
     saveStore();
     if (name) recordSeen(store, uid, name);
     log('拉黑', uid, name || '');
@@ -1267,6 +1467,7 @@
         : (store.conf.clearCards !== false ? '；文字记录一直保留着（已清的点播卡片不会回来）' : '；已有记录一直保留着')), '#68b26d');
     if (ui) { ui.refreshAll(); }
     try { hideSessionNodes(); } catch (e) { noteError('恢复会话项', e); }   // 恢复被隐藏的私聊会话项
+    try { sweepMailCards(null, false); } catch (e) { noteError('恢复信箱卡片', e); }   // 恢复被隐藏的信箱卡片
   }
 
   function statusMsg(t, c) { if (ui) ui.setStatus(t, c); else log(t); }
@@ -1336,6 +1537,35 @@
         rowFor: rowFor,
         sweepNode: sweepNode,
         isBlockedIn: (u) => isBlocked(u),
+        // 信箱（侧栏「信箱」面板 #leaveMsgHolder）逐条报告"认人结果"，用来定位"为什么这条没藏"：
+        // 加了名字/头像但没命中 → 看 avatarKey 两边是不是同一个；命中了却没 hidden → 看 keepHistory 是不是开着
+        mailCards: function () {
+          const rows = mailCardRows(document);
+          const uids = {};
+          for (const k in store.uids) uids[k] = (store.uids[k] || {}).name || '';
+          return {
+            enabled: !!store.enabled,
+            keepHistory: store.conf.keepHistory !== false,
+            panelSeen: mailPanelSeen,
+            uids: uids,
+            rows: rows.map((row) => {
+              const parts = mailCardParts(row);
+              const hit = store.enabled ? mailHit(store, parts.name, parts.avatar) : null;
+              return {
+                name: parts.name,
+                avatar: parts.avatar,
+                avatarKey: avatarKey(parts.avatar),
+                blocked: !!hit, by: hit ? hit.by : '', uid: hit ? hit.uid : '',
+                hidden: row.hasAttribute('data-bl-mail-hidden'),
+                display: row.style.display || '',
+                text: String(row.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+              };
+            }),
+          };
+        },
+        avatarKey: avatarKey,
+        mailHit: mailHit,
+        sweepMail: function () { return sweepMailCards(document, false); },
         lastSweep: function () { const d = lastSweepDiag; lastSweepDiag = []; return JSON.parse(JSON.stringify(d)); },
         // 控件点不动时先跑这个：报告每个开关行/按钮的位置、实际渲染尺寸、该点位命中的元素是谁
         // （命中元素不在该行内 → 被别的东西盖住了；尺寸为 0 → 面板根本没显示）

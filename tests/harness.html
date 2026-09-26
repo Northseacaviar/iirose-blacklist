@@ -25,6 +25,27 @@
   <div class="pmItem" ip="keep00000004d"><span>正常联系人</span></div>
 </div>
 
+<!-- 信箱面板：结构照 2026-09-26 真机探针（blk-mail2-*）原文抄下来的
+     #leaveMsgHolder > .cardTag > .cardTagI > (.cardTagAvatar > img) + .cardTagName
+     条目里没有 uid，只有名字与头像 —— 这正是信箱只能按 名字/头像 认人的原因 -->
+<div id="hidePanel">
+  <div id="leaveMsgHolder">
+    <div class="cardTag" id="mailHistLike">
+      <div class="cardTagBg mdi-image-outline"><div class="cardTagNew"></div></div>
+      <div class="cardTagI">
+        <div class="cardTagAvatar whoisTouch2" onclick="getProfile(['信箱拉黑人','fffeff','https://s.iirose.com/images/icon/cartoon/900001.jpg','2',null])"><img src="https://s.iirose.com/images/icon/cartoon/900001.jpg"></div>
+        <div class="cardTagName textColor">信箱拉黑人</div>
+      </div>
+    </div>
+    <div class="cardTag" id="mailHistOther">
+      <div class="cardTagI">
+        <div class="cardTagAvatar whoisTouch2" onclick="getProfile(['路人甲','fffeff','https://s.iirose.com/images/icon/cartoon/900002.jpg','2',null])"><img src="https://s.iirose.com/images/icon/cartoon/900002.jpg"></div>
+        <div class="cardTagName textColor">路人甲</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <pre id="out"></pre>
 
 <script>
@@ -56,6 +77,15 @@ window.__FRAMES = {
   priv2: '""1700000101>' + BLOCK + '>乙>http://av/2.jpg>secret>339f88>>339f88>3>http://bg/1.png>333'
     + '<1700000102>' + OTHER + '>甲>http://av/1.jpg>hi>339f88>>339f88>3>http://bg/2.png>444',
   danmaku: '=乙>danmaku>040b02>040b02>1>http://av/1.jpg>1700000003>' + BLOCK + '>g>2325>f590',
+
+  // 信箱（通知）帧：'@' + 子类型字符，记录以 '<' 分、字段以 '>' 分
+  // 7 字段：用户名>头像>性别>标记(+附言)>背景>时间>颜色；3 字段 = 房间公告
+  mailRec: (name, avatar, marker, extra) => [name, avatar, '2', "'" + marker + (extra || ''), '', '1762613079', 'd28ad2'].join('>'),
+  mailLike: (name, avatar) => '@*' + [name, avatar, '2', "'*", '', '1762613079', 'd28ad2'].join('>'),
+  mailFollower: (name, avatar) => '@*' + [name, avatar, '2', "'^", '', '1762613079', 'd28ad2'].join('>'),
+  mailPayment: (name, avatar) => '@*' + [name, avatar, '2', "'$1 谢谢", '', '1762613079', 'd28ad2'].join('>'),
+  mailNotice: (text) => '@*' + [text, 'bg.png', '1762613000'].join('>'),
+  roomOne: (uid, name, avatar) => '"1700000009>' + avatar + '>' + name + '>hi>040b02>040b02>1>>' + uid + '>g>111',
 };
 </script>
 
@@ -773,6 +803,110 @@ async function run() {
     await sleep(650);
     eq(ev.defaultPrevented, false, '长按文字被 preventDefault 了 —— 系统复制菜单会被顶掉');
     eq(menuNow(), null, '长按文字后出现了菜单');
+  });
+
+  // ---------------- v0.3.0：信箱（通知）屏蔽 ----------------
+  // 每个用例块都用 try/finally 收尾：一个用例断言失败不能把"名单里还留着谁"漏给后面的用例
+  // （第一版就是漏了，W51 中途失败后残留的同名条目把 W53 的最后一条断言带崩了）
+  await t('W50 信箱卡片：历史卡片在「保留历史」关（默认）时被 display:none 隐藏，节点保留（可还原）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true); A.setKeepHistory(false);
+    const uid = 'mailbox0001aa';
+    const card = document.getElementById('mailHistLike');
+    ok(card, '信箱夹具卡片缺失');
+    eq(card.style.display, '', '前置条件：卡片应是可见的');
+    try {
+      A.block(uid, '信箱拉黑人');
+      await sleep(300);
+      eq(card.style.display, 'none', '被拉黑者的信箱卡片没被隐藏');
+      ok(document.body.contains(card), '卡片节点被删了 —— 应只隐藏不删（要能还原）');
+      ok(card.hasAttribute('data-bl-mail-hidden'), '没打隐藏标记，解除拉黑后还原不了');
+    } finally { A.unblock(uid); }
+    await sleep(300);
+    eq(card.style.display, '', '解除拉黑后没还原显示');
+    ok(!card.hasAttribute('data-bl-mail-hidden'), '还原后标记没清掉');
+  });
+
+  await t('W51 信箱卡片：「保留历史」开着 → 已渲染的算历史留着，之后新来的那条（转账）被隐藏', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true); A.setKeepHistory(true);
+    const uid = 'mailbox0002bb';
+    const holder = document.getElementById('leaveMsgHolder');
+    const hist = document.getElementById('mailHistLike');
+    let card = null;
+    try {
+      A.block(uid, '信箱拉黑人');
+      await sleep(300);
+      eq(hist.style.display, '', '保留历史开着，却把已存在的卡片隐了（历史该留着）');
+
+      // 转账帧按「钱优先」必须原样到达站点，因此站点会渲染出一条新卡片 —— 新卡片属于"新的"，要隐
+      const pay = F.mailPayment('信箱拉黑人', 'https://s.iirose.com/images/icon/cartoon/900001.jpg');
+      window.__RECV.length = 0;
+      window.socket._onmessage(pay);
+      eq(window.__RECV[0], pay, '转账帧被丢了 —— 违反「钱优先」的裁决');
+      card = document.createElement('div');
+      card.className = 'cardTag';
+      card.innerHTML = '<div class="cardTagI"><div class="cardTagAvatar whoisTouch2">'
+        + '<img src="https://s.iirose.com/images/icon/cartoon/900001.jpg"></div>'
+        + '<div class="cardTagName textColor">信箱拉黑人</div></div>';
+      holder.appendChild(card);
+      await sleep(300);
+      eq(card.style.display, 'none', '新来的转账卡片没被隐藏（保留历史 = 只拦新的）');
+    } finally {
+      if (card && card.parentNode) card.parentNode.removeChild(card);
+      A.unblock(uid); A.setKeepHistory(false);
+    }
+  });
+
+  await t('W52 信箱卡片：别人的卡片一行不动（零影响）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true); A.setKeepHistory(false);
+    const uid = 'mailbox0003cc';
+    const other = document.getElementById('mailHistOther');
+    try {
+      A.block(uid, '信箱拉黑人');
+      await sleep(300);
+      eq(other.style.display, '', '别人的信箱卡片被误隐了');
+    } finally { A.unblock(uid); }
+  });
+
+  await t('W53 信箱帧：被拉黑者的点赞通知在协议层就被丢掉（信箱红点不亮）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    const uid = 'mailbox0004dd';
+    const like = F.mailLike('信箱点赞人', 'cartoon/900001');
+    try {
+      A.block(uid, '信箱点赞人');
+      window.__RECV.length = 0;
+      window.socket._onmessage(like);
+      eq(window.__RECV.length, 0, '被拉黑者的点赞通知还是送到了站点（红点会亮）');
+      const otherLike = F.mailLike('别人家的名字', 'cartoon/123456');
+      window.socket._onmessage(otherLike);
+      eq(window.__RECV[0], otherLike, '别人的点赞通知被误拦');
+    } finally { A.unblock(uid); }
+    await sleep(120);
+    window.__RECV.length = 0;
+    window.socket._onmessage(like);
+    eq(window.__RECV[0], like, '解除拉黑后点赞通知应恢复到达');
+  });
+
+  await t('W54 信箱帧：房间公告（3 字段）一律不动；没名字时按头像也能认人（帧短路径 vs DOM 完整 URL）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    const uid = 'mailbox0005ee';
+    // 让他先发一条房间消息：插件把 uid→头像 记进"最近出现"，拉黑时快照进名单
+    window.socket._onmessage(F.roomOne(uid, '信箱头像人', 'cartoon/900777'));
+    await sleep(120);
+    try {
+      A.block(uid);                     // 不传名字：逼它用记录里那份信息
+      const notice = F.mailNotice('服务器维护公告');
+      window.__RECV.length = 0;
+      window.socket._onmessage(notice);
+      eq(window.__RECV[0], notice, '房间公告被误拦了（站级通知一律不动）');
+      window.__RECV.length = 0;
+      window.socket._onmessage(F.mailFollower('换了个名字', 'https://s.iirose.com/images/icon/cartoon/900777.jpg'));
+      eq(window.__RECV.length, 0, '头像命中却没拦下（帧里 cartoon/900777 与记录里同一张）');
+    } finally { A.unblock(uid); }
   });
 
   const fail = results.filter((r) => !r.ok);
