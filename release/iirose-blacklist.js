@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.3.4';
-  const VERSION_CODE = 24;          // 官方规范要求：数字版本号，每次发布递增 1
+  const VERSION = '0.3.5';
+  const VERSION_CODE = 25;          // 官方规范要求：数字版本号，每次发布递增 1
   try { window.__IIROSE_BLACKLIST_VERSION__ = VERSION; } catch (e) { }
 
   const STORE_KEY = 'iirose_blacklist_v1';
@@ -342,12 +342,15 @@
     const recs = data.slice(2).split('<');
     const kept = [];
     let keptBlocked = 0, keptClean = 0;         // 活下来的记录里：被屏蔽者来的 / 别人的（决定要不要开静默闸）
+    mailDiag.at = Date.now(); mailDiag.raw = String(data).slice(0, 180); mailDiag.recs = []; mailDiag.act = '';
+    let dropped = 0;
     for (let i = 0; i < recs.length; i++) {
       const rec = recs[i];
       const info = mailRecordInfo(rec.split('>'));
       const name = info ? unescapeHtml(info.name) : '';
       const hit = (info && store.enabled && name) ? mailHit(store, name) : null;
-      if (!info || !store.enabled) { kept.push(rec); if (info) keptClean++; else keptClean++; continue; }
+      mailDiagPush(rec.split('>'), name, info, hit);
+      if (!info || !store.enabled) { kept.push(rec); keptClean++; continue; }
       if (!hit) { kept.push(rec); keptClean++; continue; }
       if (!info.blockable) {                    // 转账（'$'）：不丢帧（钱优先），但站点接下来会弹信箱 → 开静默闸
         kept.push(rec); keptBlocked++;
@@ -356,6 +359,7 @@
       out.kind = 'mail';
       out.blocked.push({ uid: hit.uid, name: name, kind: 'mail', type: info.type });
       if (hooks && hooks.onBlock) hooks.onBlock(hit.uid, 'mail');
+      dropped++;
       // 丢掉这条记录（不 push）
     }
     if (out.blocked.length) {
@@ -364,6 +368,9 @@
     }
     // 整帧都是被屏蔽者的记录、且还有记录活得下来（转账）→ 站点马上会弹面板/响铃/推通知，开闸全吞掉
     if (store.enabled && keptBlocked > 0 && keptClean === 0) armMailSilence();
+    mailDiag.act = '丢 ' + dropped + ' 条 · 留 ' + kept.length + ' 条'
+      + (keptBlocked ? '（其中被屏蔽者 ' + keptBlocked + ' 条）' : '')
+      + ' → ' + (store.enabled && keptBlocked > 0 && keptClean === 0 ? '开闸' : '不开闸');
     return out;
   }
 
@@ -386,6 +393,59 @@
   let mailSilentUntil = 0;
   let mailPopSwallowed = false;
 
+  // 真机诊断（v0.3.5；北海 2026-09-26 真机："版本 0.3.4 了，转账还是弹信箱"）：
+  // 这种问题靠猜没用，把帧原文 + 逐条判定 + 闸的动作摆到面板里（调试日志开时才显示）。
+  const mailDiag = {
+    at: 0, raw: '', recs: [], act: '',
+    armed: 0, popsSeen: 0, lastPopUnsilenced: 0,
+    swallowed: { pop: 0, sound: 0, push: 0 },
+  };
+
+  function mailDiagPush(fields, name, info, hit) {
+    if (mailDiag.recs.length >= 5) return;
+    mailDiag.recs.push({
+      n: fields.length, name: String(name || '').slice(0, 28),
+      type: info ? info.type : '形状不认识',
+      blockable: info ? !!info.blockable : null, hit: !!hit,
+    });
+  }
+
+  function yn(v) { return v ? '✓' : '✗'; }
+  function secsAgo(ts) { return ts ? Math.round((Date.now() - ts) / 1000) + ' 秒前' : '—'; }
+
+  // 三处闸装没装上（站点函数在不在、有没有被我们套上）
+  function guardKinds() {
+    const g = { panelAnimate: false, notiSound: false, push: false };
+    try {
+      g.panelAnimate = !!(typeof window !== 'undefined' && window.panelAnimate && window.panelAnimate.__blWrapped);
+      g.notiSound = !!(typeof window !== 'undefined' && window.Utils && window.Utils.Resource
+        && window.Utils.Resource.notiSound && window.Utils.Resource.notiSound.__blWrapped);
+      g.push = !!(typeof window !== 'undefined' && window.Objs && window.Objs.homeHolder
+        && window.Objs.homeHolder.function && window.Objs.homeHolder.function.push
+        && window.Objs.homeHolder.function.push.__blWrapped);
+    } catch (e) { }
+    return g;
+  }
+
+  function mailDiagText() {
+    const d = mailDiag, s = d.swallowed, g = guardKinds();
+    const out = [];
+    out.push('信箱诊断');
+    out.push('装闸：弹面板' + yn(g.panelAnimate) + ' · 提示音' + yn(g.notiSound) + ' · 未读' + yn(g.push));
+    out.push('弹面板被调用 ' + d.popsSeen + ' 次 → 吞 ' + s.pop + ' · 放 ' + (d.popsSeen - s.pop)
+      + (d.lastPopUnsilenced ? '（最近一次没吞：' + secsAgo(d.lastPopUnsilenced) + '）' : ''));
+    out.push('静默闸：开过 ' + d.armed + ' 次 · 另吞 铃 ' + s.sound + ' / 未读 ' + s.push);
+    if (!d.at) { out.push('最近 @ 帧：没收到过（收包未挂载，或这段时间没人来信箱）'); return out.join('\n'); }
+    out.push('最近 @ 帧（' + secsAgo(d.at) + '）：' + d.raw);
+    for (let i = 0; i < d.recs.length; i++) {
+      const r = d.recs[i];
+      out.push('  · ' + r.n + ' 格 / "' + r.name + '" / ' + r.type + ' / 名单命中' + yn(r.hit)
+        + ' / 可丢' + (r.blockable === null ? '—（形状不认识，一律放行）' : yn(r.blockable)));
+    }
+    out.push('判定：' + (d.act || '—'));
+    return out.join('\n');
+  }
+
   // CORE 段在单测里是裸 vm（没有外层的 log/console），所以这里一律走安全壳
   function mailLog() {
     try { if (typeof log === 'function') log.apply(null, arguments); } catch (e) { }
@@ -394,6 +454,7 @@
   function armMailSilence() {
     mailSilentUntil = Date.now() + MAIL_SILENCE_MS;
     mailPopSwallowed = false;
+    mailDiag.armed++;
     mailLog('信箱静默闸：开（被屏蔽者的通知只留卡片，不弹面板/不响铃/不推未读）');
   }
   function mailSilenceOn() {
@@ -415,10 +476,15 @@
     try {
       wrapSiteFn(window, 'panelAnimate', function (orig) {
         return function (type, show) {                       // panelAnimate(40, 1) = 弹出信箱
-          if (type === MAIL_PANEL_ANIM && show && mailSilenceOn() && !mailPopSwallowed) {
-            mailPopSwallowed = true;
-            mailLog("信箱静默闸：吞掉一次弹面板");
-            return;
+          if (type === MAIL_PANEL_ANIM && show) {
+            mailDiag.popsSeen++;
+            if (mailSilenceOn() && !mailPopSwallowed) {
+              mailPopSwallowed = true;
+              mailDiag.swallowed.pop++;
+              mailLog("信箱静默闸：吞掉一次弹面板");
+              return;
+            }
+            mailDiag.lastPopUnsilenced = Date.now();
           }
           return orig.apply(this, arguments);
         };
@@ -428,7 +494,7 @@
       const R = window.Utils && window.Utils.Resource;
       wrapSiteFn(R, 'notiSound', function (orig) {
         return function (kind) {
-          if (kind === "mail" && mailSilenceOn()) { mailLog("信箱静默闸：吞掉提示音"); return; }
+          if (kind === "mail" && mailSilenceOn()) { mailDiag.swallowed.sound++; mailLog("信箱静默闸：吞掉提示音"); return; }
           return orig.apply(this, arguments);
         };
       });
@@ -438,7 +504,7 @@
       wrapSiteFn(H && H.function, 'push', function (orig) {
         return function (type) {
           const N = window.Constant && window.Constant.NOTIFY;
-          if (N && type === N.MAIL && mailSilenceOn()) { mailLog("信箱静默闸：吞掉未读推送"); return; }
+          if (N && type === N.MAIL && mailSilenceOn()) { mailDiag.swallowed.push++; mailLog("信箱静默闸：吞掉未读推送"); return; }
           return orig.apply(this, arguments);
         };
       });
@@ -1233,7 +1299,8 @@
     });
     const debugToggle = toggleRow('debug', '调试日志', !!store.conf.debug, (on) => {
       store.conf.debug = on; saveStore(); log('调试日志', on);
-      setStatus(on ? '调试日志已开（控制台会打统计）' : '调试日志已关', '#999');
+      setStatus(on ? '调试日志已开（面板底部有「信箱诊断」，控制台也会打统计）' : '调试日志已关', '#999');
+      setTimeout(() => { refreshStats(); }, 30);
     }, true);
     swRow.appendChild(enableToggle); swRow.appendChild(debugToggle);
     panel.appendChild(swRow);
@@ -1297,6 +1364,18 @@
     panel.appendChild(stats);
     const warn = el('div', { padding: '0 12px 6px', color: '#d0a04a', fontSize: '11px', display: 'none' });
     panel.appendChild(warn);
+    // 信箱诊断（只在"调试日志"开着时显示）：帧原文 + 逐条判定 + 闸的动作 —— 真机排查用
+    const mailDiagBox = el('pre', {
+      margin: '0', padding: '6px 12px 8px', color: '#8fa0b5', fontSize: '10.5px', lineHeight: '1.5',
+      whiteSpace: 'pre-wrap', wordBreak: 'break-all', borderTop: '1px solid #2a2b33', display: 'none',
+      fontFamily: 'Consolas, Menlo, monospace', maxHeight: '160px', overflowY: 'auto',
+    });
+    panel.appendChild(mailDiagBox);
+    function refreshMailDiag() {
+      if (!store.conf.debug) { mailDiagBox.style.display = 'none'; return; }
+      mailDiagBox.style.display = 'block';
+      mailDiagBox.textContent = mailDiagText();
+    }
     const diagLine = el('div', { padding: '6px 12px', color: '#7f8794', fontSize: '11px', lineHeight: '1.5' }, '自检：面板打开后 1 秒自动跑');
     panel.appendChild(diagLine);
 
@@ -1391,6 +1470,7 @@
       if (c.err) msgs.push('存在内部异常 ' + c.err + ' 次（详见控制台）');
       if (msgs.length) { warn.textContent = msgs.join('；'); warn.style.display = 'block'; }
       else warn.style.display = 'none';
+      refreshMailDiag();
     }
 
     installGestureProbes(panel);
@@ -1628,6 +1708,10 @@
           };
         },
         mailHit: mailHit,
+        // 真机诊断（面板上"调试日志"开着时显示同一份内容）
+        mailDiag: function () { return JSON.parse(JSON.stringify(mailDiag)); },
+        mailDiagText: function () { return mailDiagText(); },
+        guardKinds: function () { return guardKinds(); },
         // 信箱静默闸的自检：装没装上、闸开没开（真机排障用）
         mailSilence: function () {
           return {
