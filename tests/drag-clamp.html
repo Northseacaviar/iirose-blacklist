@@ -215,25 +215,27 @@
     fab.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 1, pointerType: 'mouse' }));
     inView(R(fab), 'pointercancel 中断后仍在界内', 1);
 
-    log('\n[10] 诊断大字窗口：能打开、能关掉（修复项：捕获阶段拦事件会把窗口里所有按钮一起掐死）');
+    log('\n[10] 诊断：界面入口全部隐藏（按钮 + 面板内文本块），大字窗口仍可经 API 打开并关掉');
     const api = window.__IIROSE_BLACKLIST__;
     if (panel && api && api.setDebug) {
       if (panel.style.display === 'none') tap(fab);
       api.setDebug(true);
       await sleep(150);
       const diagBtn = [...panel.querySelectorAll('button')].find(b => (b.textContent || '').trim() === '诊断');
-      ok(!!diagBtn && diagBtn.style.display === 'none', '面板底部的「诊断」入口已隐藏',
+      ok(!!diagBtn && diagBtn.style.display === 'none', '面板底部「诊断」按钮已隐藏',
         diagBtn ? 'display=' + (diagBtn.style.display || '(空=可见)') : '没找到按钮');
       const diagBox = panel.querySelector('pre');
-      if (!diagBox) { log('  面板内诊断块没找到', 'bad'); fail++; }
-      else {
-        tap(diagBox);
-        await sleep(150);
-        // 按特征找大字窗口：面板的诊断文本开头也是「信箱诊断」，只按文本找会命中面板本身（踩过）
-        const findOverlay = () => [...document.body.children].filter(n => n.tagName === 'DIV' && n !== panel && n !== fab)
-          .find(n => [...n.querySelectorAll('button')].some(b => (b.textContent || '').trim() === '关闭'));
+      ok(!!diagBox && diagBox.style.display === 'none', '面板内诊断文本块已隐藏（即使开着调试日志）',
+        diagBox ? 'display=' + (diagBox.style.display || '(空=可见)') : '没找到文本块');
+      ok(typeof api.openDiag === 'function', 'API 提供 openDiag（界面入口撤了之后的排障路）');
+      // 按特征找大字窗口：面板的诊断文本开头也是「信箱诊断」，只按文本找会命中面板本身（踩过）
+      const findOverlay = () => [...document.body.children].filter(n => n.tagName === 'DIV' && n !== panel && n !== fab)
+        .find(n => [...n.querySelectorAll('button')].some(b => (b.textContent || '').trim() === '关闭'));
+      if (typeof api.openDiag === 'function') {
+        api.openDiag();
+        await sleep(200);
         const overlay = findOverlay();
-        ok(!!overlay, '点面板内诊断块 → 大字窗口打开', overlay ? '窗口在 DOM 里' : '没打开');
+        ok(!!overlay, '经 API 打开大字窗口', overlay ? '窗口在 DOM 里' : '没打开');
         if (overlay) {
           const closeB = [...overlay.querySelectorAll('button')].find(b => (b.textContent || '').trim() === '关闭');
           ok(!!closeB, '窗口里有「关闭」按钮');
@@ -243,6 +245,8 @@
             ok(!findOverlay(), '点「关闭」→ 窗口消失（真机上原来这一步点不动）');
           }
         }
+        api.openDiag();                                  // 收尾：还开着就再点一次关掉（openDiag 是开合切换）
+        await sleep(100);
       }
       api.setDebug(false);
     } else { log('  拿不到面板或 API，跳过', 'bad'); fail++; }
