@@ -1,4 +1,4 @@
-// 复核审查报告的两个「阻塞」项（用真实源码跑，不复制实现）
+// 复核两个「阻塞」项（用真实源码跑，不复制实现）
 // 用法：node tests/probe-review.js
 const fs = require('fs');
 const path = require('path');

@@ -1,7 +1,7 @@
 /* 发布件同步脚本：src/iirose-blacklist.js → release/ 与仓库根目录
  *
  * 为什么要它：jsdelivr 的默认地址取的是仓库根目录那个文件，以前靠手工复制，
- * 忘了复制就会"测试全过但朋友拿到的是旧版"（2026-09-25 审查实测到过一次）。
+ * 忘了复制就会"测试全过但朋友拿到的是旧版"（实测到过一次）。
  *
  * 用法：node tools/publish.js        复制并校验
  *       node tools/publish.js --check 只校验不复制（CI/提交前用）

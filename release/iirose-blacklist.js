@@ -791,7 +791,7 @@
     if (!marked) row.setAttribute('data-bl-mail-prev-display', row.style.display || '');   // 只在第一次记原值
     if (marked && row.style.display === 'none') return 0;      // 已经隐好了：不重复计数
     row.setAttribute('data-bl-mail-hidden', '1');
-    // 站点重渲染会把 display 改回可见（审查 D3 实测：标记还在、卡却露出来了）—— 这里每次扫都按回去
+    // 站点重渲染会把 display 改回可见（实测：标记还在、卡却露出来了）—— 这里每次扫都按回去
     row.style.display = 'none';
     return marked ? 0 : 1;
   }
@@ -834,7 +834,7 @@
     const rows = mailCardRows(scope);
     // 什么时候算"历史批次"（「保留历史」开着时留着不动）：
     //   ① 非增量（启动/定时/拉黑后的全扫）→ 页面上既有的这批就是历史；
-    //   ② 增量，但新增的子树**带着面板本身**（审查 D6：站点把面板整块插入，里面本就带着历史卡片）。
+    //   ② 增量，但新增的子树**带着面板本身**（站点把面板整块插入，里面本就带着历史卡片）。
     // 反面：面板早就在 DOM 里、只是往里 append 了一张卡片 = 站点新推来的通知 → 必须按"新"处理。
     // （真机反馈：面板空着时，被拉黑者的第一条通知被当历史留了下来 —— 就是漏在这个反面。）
     const panelBuilt = incremental && bringsPanelItself(scope);
@@ -1274,7 +1274,7 @@
     };
     handle.addEventListener('pointerdown', (e) => { usingPointer = true; start(e); });
     handle.addEventListener('pointerup', () => { usingPointer = false; end(); });
-    handle.addEventListener('pointercancel', () => { dragging = false; ended = gid; });   // 审查 S7：标记已结算，免得后续 mouseup 再走一遍结算逻辑
+    handle.addEventListener('pointercancel', () => { dragging = false; ended = gid; });   // 标记已结算，免得后续 mouseup 再走一遍结算逻辑
     handle.addEventListener('pointermove', move);
     // 鼠标这条线保留：① 老浏览器没有 PointerEvent；② 有些环境（测试夹具、被站点改造过的合成事件）
     // 只发 mouse 事件不发 pointer 事件 —— 真机实测 pointerdown 先到，所以有指针事件时忽略这对鼠标事件。
@@ -1351,7 +1351,7 @@
     swRow.appendChild(enableToggle); swRow.appendChild(debugToggle);
     panel.appendChild(swRow);
 
-    // 历史处理（2026-09-25 需求重新界定：拉黑时遍历聊天记录，清掉他的点歌卡片 + 历史消息）
+    // 历史处理：拉黑时遍历聊天记录，清掉他的点歌卡片 + 历史消息
     const keepToggle = toggleRow('keepHistory', '拉黑时保留他的历史消息', store.conf.keepHistory !== false, (on) => {
       store.conf.keepHistory = on; saveStore();
       setStatus(on ? '只拦新消息，他的历史消息都留着（点播卡片仍会清）' : '拉黑时清掉他的历史消息 + 点播卡片（不可逆）', on ? '#68b26d' : '#d0a04a');

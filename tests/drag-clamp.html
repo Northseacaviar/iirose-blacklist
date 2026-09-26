@@ -107,7 +107,7 @@
     const cl = (t, lo, hi) => Math.min(Math.max(lo, t), Math.max(lo, hi));
     return { left: cl(left, 4, vw - w - 4), top: cl(top, 4, vh - h - 4) };
   }
-  // 视口放不下面板（330px 宽 + 8px 边距）时，面板越界是已声明取舍 —— 标 SKIP 而不是假红（审查 S2）
+  // 视口放不下面板（330px 宽 + 8px 边距）时，面板越界是已声明取舍 —— 标 SKIP 而不是假红
   const PANEL_FITS = window.innerWidth >= 348;
   function inViewPanel(r, name) {
     if (!PANEL_FITS) { log('  SKIP  ' + name + '（视口宽 ' + window.innerWidth + ' < 348：面板固定 330px，放不下属已声明取舍）'); return; }
