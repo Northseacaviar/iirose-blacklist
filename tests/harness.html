@@ -46,6 +46,19 @@
   </div>
 </div>
 
+<!-- 房间列表：结构照站内房间卡片模板（.mapHolderRoomListItem.shopItem[rid=房间id]，
+     房间名 = 文字区第一行 .textOverflowEllipsis）—— 热推/订阅/管理/历史/地图树共用这一套 -->
+<div id="roomListBox">
+  <div class="whoisTouch2 mapHolderRoomListItem shopItem" rid="a1b2c3d4e5f6" n="2_1_">
+    <div class="textOverflowEllipsis">吵闹的房间</div>
+    <div class="textOverflowEllipsis2Line">简介一</div>
+  </div>
+  <div class="whoisTouch2 mapHolderRoomListItem shopItem" rid="b2c3d4e5f601" n="2_1_">
+    <div class="textOverflowEllipsis">安静的房间</div>
+    <div class="textOverflowEllipsis2Line">简介二</div>
+  </div>
+</div>
+
 <pre id="out"></pre>
 
 <script>
@@ -909,6 +922,135 @@ async function run() {
       window.socket._onmessage(F.mailFollower('信箱头像人', 'cartoon/999999'));
       eq(window.__RECV.length, 0, '名字命中却没拦下');
     } finally { A.unblock(uid); }
+  });
+
+  // ---------------- v0.3.12：房间屏蔽（房间列表卡片） ----------------
+  const RID_A = 'a1b2c3d4e5f6', RID_B = 'b2c3d4e5f601', RID_C = 'c3d4e5f601a2';
+  const roomCard = (rid) => document.querySelector('#roomListBox .mapHolderRoomListItem[rid="' + rid + '"]');
+  const btnIn = (root, txt) => Array.from(root.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === txt) || null;
+  // 名单行里那个按钮：先找"含该文本且带 button 的最内层 div"，再取它的 button
+  function rowButton(root, txt) {
+    const cands = Array.from(root.querySelectorAll('div'))
+      .filter((d) => d.querySelector && d.querySelector('button') && (d.textContent || '').indexOf(txt) >= 0);
+    const inner = cands.find((d) => !cands.some((o) => o !== d && d.contains(o)));
+    return inner ? inner.querySelector('button') : null;
+  }
+  async function ensurePanel() {
+    let p = panel();
+    if (p && p.style.display !== 'none') return p;
+    const fab = Array.from(document.querySelectorAll('div')).find((d) => d.textContent === '🚫' && d.style.borderRadius === '50%');
+    if (!fab) return null;
+    realClick(fab);
+    await sleep(200);
+    return panel();
+  }
+
+  await t('W55 房间卡片：屏蔽该 rid → display:none + 标记、节点保留；没被屏蔽的卡片一行不动', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    const a = roomCard(RID_A), b = roomCard(RID_B);
+    ok(a && b, '房间卡片夹具缺失');
+    eq(a.style.display, '', '前置条件：卡片应是可见的');
+    try {
+      A.blockRoom(RID_A, '吵闹的房间');
+      await sleep(150);
+      eq(a.style.display, 'none', '被屏蔽房间的卡片没被隐藏');
+      ok(document.body.contains(a), '卡片节点被删了 —— 应只隐藏不删（要能还原）');
+      ok(a.hasAttribute('data-bl-room-hidden'), '没打隐藏标记，解除屏蔽后还原不了');
+      eq(b.style.display, '', '没被屏蔽的房间卡片被误隐了（零影响）');
+    } finally { A.unblockRoom(RID_A); }
+    await sleep(150);
+    eq(a.style.display, '', '解除屏蔽后没还原显示');
+    ok(!a.hasAttribute('data-bl-room-hidden'), '还原后标记没清掉');
+  });
+
+  await t('W56 站点把已隐藏卡片的 display 改回可见 → 再扫必须按回去（信箱卡片踩过的同一个坑）', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    const a = roomCard(RID_A);
+    try {
+      A.blockRoom(RID_A, '吵闹的房间');
+      await sleep(150);
+      eq(a.style.display, 'none');
+      a.style.display = '';                       // 模拟站点重渲染后自己把 display 写回
+      A.sweep();
+      await sleep(80);
+      eq(a.style.display, 'none', '重扫没把 display 按回去（站点一重渲染就又露出来）');
+      ok(a.hasAttribute('data-bl-room-hidden'), '标记也要还在');
+    } finally { A.unblockRoom(RID_A); }
+  });
+
+  await t('W57 关掉「启用屏蔽」→ 已隐藏的房间卡片要还原；重新打开 → 再次隐藏', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    const a = roomCard(RID_A);
+    try {
+      A.blockRoom(RID_A, '吵闹的房间');
+      await sleep(150);
+      eq(a.style.display, 'none');
+      A.setEnabled(false);
+      await sleep(150);
+      eq(a.style.display, '', '关掉屏蔽后房间卡片没还原');
+      A.setEnabled(true);
+      await sleep(150);
+      eq(a.style.display, 'none', '重新打开屏蔽后没有重新隐藏');
+    } finally { A.unblockRoom(RID_A); A.setEnabled(true); }
+  });
+
+  await t('W58 房间列表整块重建（切 tab / 新插入卡片）：命中卡立刻隐、别的房间不动', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    const box = document.getElementById('roomListBox');
+    let holder = null;
+    try {
+      A.blockRoom(RID_A, '吵闹的房间');
+      await sleep(150);
+      holder = document.createElement('div');
+      holder.innerHTML = '<div class="mapHolderRoomListItem shopItem" rid="' + RID_A + '">'
+        + '<div class="textOverflowEllipsis">吵闹的房间</div></div>'
+        + '<div class="mapHolderRoomListItem shopItem" rid="' + RID_C + '">'
+        + '<div class="textOverflowEllipsis">第三个房间</div></div>';
+      box.appendChild(holder);
+      await sleep(250);
+      eq(holder.querySelector('[rid="' + RID_A + '"]').style.display, 'none', '新插入的卡片没被隐藏（整块重建这条路径漏了）');
+      eq(holder.querySelector('[rid="' + RID_C + '"]').style.display, '', '别的房间被误隐');
+    } finally {
+      if (holder && holder.parentNode) holder.parentNode.removeChild(holder);
+      A.unblockRoom(RID_A);
+    }
+  });
+
+  await t('W59 面板路径：贴房间 id 点「屏蔽房间」生效；「最近出现的房间」里点按钮也能屏蔽', async () => {
+    const A = window.__IIROSE_BLACKLIST__;
+    A.setEnabled(true);
+    const p = await ensurePanel();
+    ok(p, '面板没打开');
+    const input = p.querySelector('input[placeholder*="房间 id"]');
+    const addBtn = btnIn(p, '屏蔽房间');
+    ok(input && addBtn, '面板里没有房间屏蔽的输入框/按钮');
+    try {
+      input.value = RID_A;
+      realClick(addBtn);
+      await sleep(200);
+      eq(A.isRoomBlocked(RID_A), true, '点「屏蔽房间」没生效');
+      eq(roomCard(RID_A).style.display, 'none', '面板路径屏蔽后卡片没隐');
+
+      ok(A.store.rooms[RID_B], '没采集到「最近出现的房间」（列表扫过就该收进来）');
+      eq(A.store.rooms[RID_B].name, '安静的房间', '房间名读错了（判据按 rid，但名字要能显示/查找）');
+
+      const seenBtn = rowButton(p, RID_B);
+      ok(seenBtn, '「最近出现的房间」里没有这一行/按钮');
+      eq((seenBtn.textContent || '').trim(), '屏蔽', '按钮文案不对：' + seenBtn.textContent);
+      realClick(seenBtn);
+      await sleep(200);
+      eq(A.isRoomBlocked(RID_B), true, '在「最近出现的房间」里点屏蔽没生效');
+      eq(roomCard(RID_B).style.display, 'none', '点了屏蔽但卡片没隐');
+    } finally {
+      A.unblockRoom(RID_A); A.unblockRoom(RID_B);
+    }
+    await sleep(200);
+    eq(roomCard(RID_A).style.display, '', '解除后没还原');
+    eq(roomCard(RID_B).style.display, '', '解除后没还原（B）');
   });
 
   const fail = results.filter((r) => !r.ok);

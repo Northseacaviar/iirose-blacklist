@@ -9,19 +9,20 @@
 
 ## 功能与行为口径
 
-① 私聊屏蔽（无消息、无红点、无提示音）② 房间消息屏蔽（看不到 TA 的头像与发言）③ 信箱通知屏蔽（点赞/关注/点踩不产生、转账卡片不显示）④ 拉黑/解除随时可做，名单本地保存 ⑤ 拉黑时**默认连历史消息与点播卡片一起清掉**，可用面板开关改成「只拦新消息、旧记录留着」。
+① 私聊屏蔽（无消息、无红点、无提示音）② 房间消息屏蔽（看不到 TA 的头像与发言）③ 信箱通知屏蔽（点赞/关注/点踩不产生、转账卡片不显示）④ **房间屏蔽**（房间列表里隐藏指定房间的卡片）⑤ 拉黑/解除随时可做，名单本地保存 ⑥ 拉黑时**默认连历史消息与点播卡片一起清掉**，可用面板开关改成「只拦新消息、旧记录留着」。
 
-三条硬口径：
+四条硬口径：
 
 - **判据只按名字**（trim + 小写完全相等）：信箱帧与卡片里都没有 uid（条目 `getProfile([名字, 颜色, 头像, 性别, null])` 第 5 位即 `null`），只能按名字认人；**接受同名误伤**，不做严格模式。按头像判人已整块移除 —— 预置卡通头像（如 `cartoon/600264`）可能多用户共用，会连累无关路人。
 - **转账永不丢帧**（钱优先）：被拉黑者的转账通知卡片隐藏，但帧原样透传 —— 金币加法、落盘、卡片渲染都不变。
 - **站级房间公告一律不动**（3 字段、不带人名那种）。
+- **房间屏蔽判据只按房间 id**（`rid` 精确相等）：房间名只用于显示与「按名字屏蔽」的查找（重名不稀奇，靠名字判会连坐）。
 
 信箱分两层：**协议层**对点赞/关注/点踩丢帧，`@` 帧逐记录判定，只丢「形状认得出 + 命中名单」的那条，认不出的字节原样保留；**界面层**把 `#leaveMsgHolder` 下 `.cardTag` 条目按名字 `display:none`（不删节点、记住原值可还原），历史卡片跟随「拉黑时保留他的历史消息」开关。其余帧（`%` 快照、`~`、`&1{...}` 媒体事件等）原样透传，非黑名单用户零影响。
 
 默认口径 `keepHistory=false`（拉黑即清历史）：每次拉黑遍历聊天记录，清掉该 uid 的历史消息与点播卡片。「清除历史点播卡片」（默认开）单独控制卡片，它开着时即使「保留历史消息」也照清。
 
-不做的：不隐藏房间成员列表里的头像（只处理聊天区与私聊）；不改站点代码、不上报服务端（纯本地效果）。
+不做的：不隐藏房间成员列表里的头像（只处理聊天区与私聊）；不改站点代码、不上报服务端（纯本地效果）；不做房间公屏消息过滤（房间消息帧里没有房间 id，且一次只在一个房间里）；不做右键/长按菜单（拉黑与屏蔽房间的入口都只在插件面板里）。
 
 ## 验收标准
 
@@ -36,7 +37,8 @@
 | A9b | 转账通知卡片在信箱里看不见，但转账照常到账（帧必须原样透传） | 真机：让 TA 转 1 钞 |
 | A9c | 站级房间公告一律不动（名字故意撞上公告文本也不拦） | 单测 |
 | A9e | 信箱卡片隐藏跟随「保留历史消息」开关：关=新旧一起隐；开=已渲染的留着、之后新来的隐 | 解除拉黑后卡片还原（只 `display:none`） |
-| A10 | 悬浮球与面板都拖不出页面：贴边 4px、贴边仍可点击、松手记住的位置不越界、面板自己长高后回到界内 | `tests/drag-clamp.html`（21 项）+ 真机四方向各拖一次 |
+| A10 | 悬浮球与面板都拖不出页面：贴边 4px、贴边仍可点击、松手记住的位置不越界、面板自己长高后回到界内 | `tests/drag-clamp.html`（27 项）+ 真机四方向各拖一次 |
+| A11 | 房间屏蔽：屏蔽某房间后，各房间列表（热推/订阅/管理/历史/地图）里它的卡片隐藏；解除或关掉「启用屏蔽」即还原；别人的房间一行不动 | `tests/harness.html` W55–W59 + 真机打开一次热推房间列表 |
 
 ## 协议与实现
 
@@ -51,6 +53,8 @@
 **形状判定按特征找、不认死下标**：名字 = 第 0 格；标记 = 第 1~5 格中第一个以 `'` 开头的格子；整条必须同时出现 9~11 位时间戳与 6 位 hex 颜色，格子数 4~9；凑不齐 = 形状不认识 → 放行。
 
 界面层 DOM 清扫（兜底）+ MutationObserver 增量：uid 优先取头像上的 `data-uid`，`data-id` 只作兜底（含下划线时会切出假 uid）。点播卡片行没有 `data-id`、行内深处有 `data-uid`，且行内必有 `systemCardMediaShare*` 类名，两者相配即可按 uid 归属。被屏蔽者来信箱时用 600ms「静默闸」吞掉站点那三件事（弹面板 `panelAnimate(40,1)`、提示音、推未读），每窗最多吞一次。排障出口：`_diag.mailCards()` / `sweepMail()` / `mailSilence()` / `mailDiagText()`；大字诊断窗 `__IIROSE_BLACKLIST__.openDiag()`。
+
+**房间屏蔽（界面层）**：所有房间列表共用同一套卡片模板 —— `.mapHolderRoomListItem.shopItem[rid=房间id]`（热推 / 订阅 / 管理 / 历史 / 地图树 / 选房器），所以一条选择器覆盖全部。命中即 `display:none` + `data-bl-room-hidden` 标记（不删节点），解除或关掉「启用屏蔽」还原；站点把 `display` 改回可见时每次清扫按回去。卡片结构一变（找不到 rid）失效方向是「漏拦」，不会误伤。排障出口：`_diag.rooms()` / `sweepRooms()`。
 
 ## 安装：给朋友用（一行地址）
 
@@ -85,9 +89,9 @@ https://cdn.jsdelivr.net/gh/Northseacaviar/iirose-blacklist@main/iirose-blacklis
 
 - 本地调试：双击 `start.bat`（起 127.0.0.1:8770），站点 console 里 `js` 粘贴 `http://127.0.0.1:8770/src/iirose-blacklist.js`
 - 面板开关：**启用屏蔽 / 拉黑时保留他的历史消息 / 清除历史点播卡片 / 隐藏私聊会话条目 / 调试日志**。诊断的界面入口自 v0.3.11 起全部隐藏（代码保留），需要时用 `__IIROSE_BLACKLIST__.openDiag()` 开 760px 大字窗（可滚动、可复制全文）
-- 自测：`node tests/core.test.js`（56 项）· `tests/harness.html`（54）· `mail-pop.html`（8）· `mail-fresh.html`（4，测面板首次出现的时序）· `official-mode.html`（23）· `migration.html`（7）· `drag-clamp.html`（21）· `loader-test.html`（6）· `loader-stub.html`（16，桩造四种选版组合）· `loader-cdn.html`（走真 CDN）· `probe3-selftest.html`（11）· `probe3-selftest-b.html`（6）
+- 自测：`node tests/core.test.js`（61 项）· `tests/harness.html`（59）· `mail-pop.html`（8）· `mail-fresh.html`（4，测面板首次出现的时序）· `official-mode.html`（23）· `migration.html`（7）· `drag-clamp.html`（27）· `loader-test.html`（6）· `loader-stub.html`（16，桩造四种选版组合）· `loader-cdn.html`（走真 CDN）· `probe3-selftest.html`（11）· `probe3-selftest-b.html`（6）
 - 浏览器夹具用 `file://` 在**前台**标签里跑（后台标签被节流，表现是「一直卡在跑测试中」）；harness 会把结果写进 localStorage 键 `bl_harness_result`，掉线重开同源页可读回。自建静态服务前先 `netstat -ano | grep :端口` 确认只有一个 LISTENING。`official-mode.html` 若同浏览器先跑过 harness（它往 localStorage 写名单）会假失败，先 `localStorage.clear()` 或换无痕窗口
-- 面板点不动的排障：`_diag.hitTest()`（是否被盖住 / 尺寸归零）、`_diag.watchClick()`（装点击探针看哪几层事件）、`sweep()` 全扫 / `debugSweep()` 逐行报告 DOM 清扫结果；`setEnabled/setDebug/setRightClick/setKeepHistory/setClearCards/setHideSession` 是不依赖鼠标的备用入口
+- 面板点不动的排障：`_diag.hitTest()`（是否被盖住 / 尺寸归零）、`_diag.watchClick()`（装点击探针看哪几层事件）、`sweep()` 全扫 / `debugSweep()` 逐行报告 DOM 清扫结果 / `_diag.rooms()` 逐张房间卡片报告（rid、名字、是否命中、是否已隐藏）；`setEnabled/setDebug/setRightClick/setKeepHistory/setClearCards/setHideSession/blockRoom/unblockRoom` 是不依赖鼠标的备用入口
 
 ## 手机（触屏）
 
@@ -131,6 +135,8 @@ start.bat 本地托管 8770（自定义 JS 注入调试用）
 - **下行帧是否已转义分隔符**：面板勾「调试日志」后看「可疑帧」计数是否增长，配合 `rawStats()` 看帧前缀分布
 - **与 iiroseForge 共存（A8）**：装 forge 后确认 `hooked === true`、`rawStats()` 持续增长、切房/重连后仍过滤
 - **联调 W22 偶发失败**（单次红、重跑不复现，已定位不是插件问题）：该用例用固定 `sleep 6000` 去等 5 秒自检周期，本就卡在边界；下一步改成轮询 `hooked`
+- **房间卡片选择器覆盖面**：`.mapHolderRoomListItem[rid]` 来自站内模板说明（地图树/热推/选房器通用），真机只验了热推那一处；房间目录、选房器、地图树里是否同一形态待核（探针：`_diag.rooms()` 看 rid 与名字读没读到）
+- **房间卡片的隐藏时机**：切 tab 整块重建时靠 MutationObserver 立刻隐，若站点改用虚拟列表复用节点（只改 rid 不改 display）需要复测
 
 ## 版本
 
@@ -138,6 +144,7 @@ start.bat 本地托管 8770（自定义 JS 注入调试用）
 
 | tag | 内容 |
 |---|---|
+| `v0.3.13` | 插件 v0.3.12：**房间屏蔽** —— 房间列表（热推/订阅/管理/历史/地图）里隐藏指定房间的卡片，可随时解除 |
 | `v0.3.12` | 插件 v0.3.11：诊断的界面入口全部隐藏，改用控制台 `openDiag()` 开大字窗 |
 | `v0.3.11` | 插件 v0.3.10：诊断大字窗「关不掉」修复 —— 原来在捕获阶段 stopPropagation，把窗内「关闭/复制全文/刷新」一起掐死，改冒泡阶段拦 |
 | `v0.3.10` | 插件 v0.3.9：修正 5 处边界问题（拖动/点击阈值统一、尺寸每帧现量 + 落盘前再钳、面板长高自愈、矮视口重算上限） |

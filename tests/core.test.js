@@ -9,7 +9,8 @@ const F = require('./frames.js');
 
 const EXPORTS = ['defaultStore', 'normalizeStore', 'isBlockedIn', 'hasUid', 'unescapeHtml',
   'recordSeen', 'looksLikeUid', 'filterFrame', 'findUidByName', 'isRecordShaped', 'findBlockedToken', 'MAX_SEEN',
-  'mailRecordInfo', 'mailHit', 'filterMailFrame'];
+  'mailRecordInfo', 'mailHit', 'filterMailFrame',
+  'looksLikeRid', 'isRoomBlockedIn', 'recordSeenRoom', 'findRidByName', 'ROOM_SEEN_GAP_MS'];
 
 function loadCore() {
   const src = fs.readFileSync(SRC, 'utf8');
@@ -342,6 +343,70 @@ t('findUidByName 忽略大小写、取最近出现的', () => {
   eq(r.hits.length, 2);
   eq(L.findUidByName(s, 'nobody').uid, null);
   eq(L.findUidByName(s, '').uid, null);
+});
+
+console.log('\n== 房间屏蔽（v0.3.12）==');
+t('looksLikeRid 边界：只用于输入校验，判定不靠它', () => {
+  eq(L.looksLikeRid('5ce6a4b520a90'), true);        // 空间站（真机 id 形态）
+  eq(L.looksLikeRid('a1b2c3d4e5'), true);           // 10 位
+  eq(L.looksLikeRid('5ce6a4b520a90_'), true);       // 官方形态允许尾部下划线
+  eq(L.looksLikeRid('a1b2c3d4e'), false);           // 9 位太短
+  eq(L.looksLikeRid('ABCDEF123456'), false);        // 大写不是官方形态
+  eq(L.looksLikeRid('abcdefghijkl'), false);        // 非 hex 字符
+  eq(L.looksLikeRid('a b c d e f g'), false);
+  eq(L.looksLikeRid(''), false);
+  eq(L.looksLikeRid(null), false);
+  eq(L.looksLikeRid(undefined), false);
+  eq(L.looksLikeRid('x'.repeat(25)), false);        // 超长
+});
+t('isRoomBlockedIn 是两参签名（单参误用会恒假 —— 这里的断言就是防它被改单参）', () => {
+  const s = L.defaultStore();
+  eq(L.isRoomBlockedIn(s, '5ce6a4b520a90'), false);
+  s.rids['5ce6a4b520a90'] = { name: '空间站', ts: 1 };
+  eq(L.isRoomBlockedIn(s, '5ce6a4b520a90'), true);
+  eq(L.isRoomBlockedIn(s, 'other0000000'), false);
+  eq(L.isRoomBlockedIn(s, ''), false);
+  eq(L.isRoomBlockedIn(s, null), false);
+});
+t('recordSeenRoom：30 秒内不重复刷新（省落盘），换名字要更新，超上限淘汰最旧', () => {
+  const s = L.defaultStore();
+  eq(L.recordSeenRoom(s, 'a1b2c3d4e5f6', '花园'), true, '首次应写入');
+  eq(L.recordSeenRoom(s, 'a1b2c3d4e5f6', '花园'), false, '30 秒内同名字应跳过（否则每 5 秒清扫都写盘）');
+  eq(L.recordSeenRoom(s, 'a1b2c3d4e5f6', '改名了'), true, '名字变了要更新');
+  s.rooms['a1b2c3d4e5f6'].ts = Date.now() - L.ROOM_SEEN_GAP_MS - 1000;
+  eq(L.recordSeenRoom(s, 'a1b2c3d4e5f6', '改名了'), true, '超过间隔应重新计时（最近出现的排序靠它）');
+  eq(L.recordSeenRoom(s, '', 'x'), false, '空 rid 不写');
+  const s2 = L.defaultStore();
+  for (let i = 0; i < L.MAX_SEEN + 20; i++) L.recordSeenRoom(s2, 'r' + i + '0000000000', 'n' + i);
+  eq(Object.keys(s2.rooms).length, L.MAX_SEEN);
+  eq(s2.rooms['r00000000000'], undefined, '最旧的应被淘汰');
+  eq(!!s2.rooms['r' + (L.MAX_SEEN + 19) + '0000000000'], true);
+});
+t('findRidByName：忽略大小写、同名取最近出现的', () => {
+  const s = L.defaultStore();
+  s.rooms.r1 = { name: '花园', ts: 100 };
+  s.rooms.r2 = { name: '花园', ts: 200 };
+  s.rooms.r3 = { name: '图书馆', ts: 300 };
+  const r = L.findRidByName(s, ' 花园 ');
+  eq(r.rid, 'r2');
+  eq(r.hits.length, 2);
+  eq(L.findRidByName(s, '图书馆').rid, 'r3');
+  eq(L.findRidByName(s, '不存在').rid, null);
+  eq(L.findRidByName(s, '').rid, null);
+  eq(L.findRidByName(s, null).rid, null);
+});
+t('normalizeStore 保留房间名单与采集（老落盘没有这两个字段也不炸）', () => {
+  const d = L.normalizeStore(null);
+  eq(Object.keys(d.rids).length, 0);
+  eq(Object.keys(d.rooms).length, 0);
+  const old = L.normalizeStore({ v: 1, uids: { abcde123456: { name: '甲', ts: 1 } } });
+  eq(Object.keys(old.rids).length, 0, '老落盘应回落空名单');
+  eq(!!old.uids.abcde123456, true, '读老落盘不能弄丢人的名单');
+  const s = L.normalizeStore({ rids: { a1b2c3d4e5f6: { name: '花园' } }, rooms: { a1b2c3d4e5f6: { name: '花园', ts: 7 }, '': { name: 'x' } } });
+  eq(s.rids['a1b2c3d4e5f6'].name, '花园');
+  eq(typeof s.rids['a1b2c3d4e5f6'].ts, 'number', '缺 ts 的名单条目要补上（否则排序 NaN）');
+  eq(s.rooms['a1b2c3d4e5f6'].ts, 7);
+  eq(s.rooms[''], undefined, '空键要丢掉');
 });
 
 console.log('\n== 边界回归（分隔符错位 / 原型污染）==');
