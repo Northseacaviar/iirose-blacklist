@@ -2,10 +2,7 @@
 
 在 iirose（蔷薇花园）里拉黑某人后：**同一房间里看不到 TA 的头像和消息，私聊也收不到**，侧栏「信箱」里 TA 的点赞/关注/点踩通知不再产生（转账卡片不显示，钱照常到账）。
 
-
-> - 人类作者（需求、方案拍板、真机验收）：**Northseacaviar** —— GitHub [@Northseacaviar](https://github.com/Northseacaviar)
-
-
+> **作者**：[@Northseacaviar](https://github.com/Northseacaviar)
 
 ## 功能与行为口径
 

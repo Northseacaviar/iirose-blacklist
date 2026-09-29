@@ -41,7 +41,7 @@
     ROOM_UID, PRIV_UID, OTHER_UID, THIRD_UID,
     roomRec, privRec, danmakuRec, mailRec, noticeRec,
 
-    // 官方文档原样样本（回归对照，别改）
+    // 官方文档样本（uid/昵称已替换为同形态假值；回归对照用，别改结构）
     docRoom: '"1700000011>https://static.codemao.cn/i/23/10/21/22/2620-Z1.bmp>测试甲>test>040b02>040b02>1>>a1b2c3d4e5f67>g\'91\'2325>111222333444',
     docPrivate: '""1700000013>f7e6d5c4b3a21>测试乙>http://r.iirose.com/i/24/1/14/20/3912-02.jpg>test>339f88>>339f88>3>http://r.iirose.com/i/21/4/7/15/4636-YT.png>555666777888',
     docDanmaku: '=测试甲>test>040b02>040b02>1>https://static.codemao.cn/i/23/10/21/22/2620-Z1.bmp>1700000012>a1b2c3d4e5f67>g>2325>f590',
